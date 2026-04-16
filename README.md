@@ -30,6 +30,16 @@ This repo is production-shaped and runs in a safe local `demo mode` by default. 
 - `npm run db:studio` - open Drizzle Studio
 - `npm run inngest:dev` - run Inngest locally against the app
 
+## Team Process
+
+The repo uses:
+
+- trunk-based development with short-lived feature branches
+- Conventional Commits for commit messages
+- milestone-oriented `0.x` semantic version tags once the app is deployable
+
+See [CONTRIBUTING.md](/home/roman/dev-env/famplan/CONTRIBUTING.md:1) for the branching and release workflow.
+
 ## Environment
 
 Copy `.env.example` to `.env.local` when you are ready to connect real services.
