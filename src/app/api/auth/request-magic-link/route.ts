@@ -31,11 +31,23 @@ async function recordAttempt(params: {
   ipHash: string;
   outcome: "blocked" | "rate_limited" | "sent" | "failed";
 }) {
-  await params.adminClient.from("auth_rate_limits").insert({
+  const { error } = await params.adminClient.from("auth_rate_limits").insert({
     email_hash: params.emailHash,
     ip_hash: params.ipHash,
     outcome: params.outcome,
   });
+
+  if (error) {
+    logAuthQueryFailure("Failed to record auth rate limit attempt", {
+      outcome: params.outcome,
+      emailHash: params.emailHash,
+      ipHash: params.ipHash,
+      error: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+  }
 }
 
 function logAuthQueryFailure(message: string, details: Record<string, unknown>) {

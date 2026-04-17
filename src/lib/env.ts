@@ -56,3 +56,9 @@ export const isSupabaseAdminConfigured = Boolean(
 export const isAuthRateLimitConfigured = Boolean(
   parsed.success && parsed.data.AUTH_RATE_LIMIT_SALT,
 );
+
+export const isAuthRequestFlowConfigured = Boolean(
+  isSupabaseConfigured &&
+    isSupabaseAdminConfigured &&
+    isAuthRateLimitConfigured,
+);
