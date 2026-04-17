@@ -16,6 +16,8 @@ import type {
 import { getViewerSession } from "@/domains/auth/session";
 
 type Row = Record<string, unknown>;
+const reminderOffsetMinutesValues = [15, 30, 60, 120, 1440] as const;
+const validReminderOffsetMinutes = new Set<number>(reminderOffsetMinutesValues);
 
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -67,10 +69,16 @@ function mapInvite(row: Row): Invite {
   };
 }
 
-function mapReminder(row: Row): EventReminder {
+function mapReminder(row: Row): EventReminder | null {
+  const parsedOffsetMinutes = Number.parseInt(asString(row.offset_minutes), 10);
+
+  if (!validReminderOffsetMinutes.has(parsedOffsetMinutes)) {
+    return null;
+  }
+
   return {
     id: asString(row.id),
-    offsetMinutes: Number(row.offset_minutes) as EventReminder["offsetMinutes"],
+    offsetMinutes: parsedOffsetMinutes as EventReminder["offsetMinutes"],
   };
 }
 
@@ -106,8 +114,8 @@ function mapDelivery(row: Row): NotificationDelivery {
 
 function mapEvent(
   row: Row,
-  reminderRows: Row[],
-  assignmentRows: Row[],
+  reminderRules: EventReminder[],
+  assignments: EventAssignment[],
 ): EventRecord {
   return {
     id: asString(row.id),
@@ -121,17 +129,19 @@ function mapEvent(
     timezone: asString(row.timezone, "UTC"),
     eventKind: asString(row.event_kind, "standard") as EventRecord["eventKind"],
     isCancelled: Boolean(row.is_cancelled),
-    reminderRules: reminderRows.map(mapReminder),
-    assignments: assignmentRows.map(mapAssignment),
+    reminderRules,
+    assignments,
   };
 }
 
-export async function getViewerHomePath() {
+export async function getViewerHomePath(
+  viewerOverride?: Awaited<ReturnType<typeof getViewerSession>>,
+) {
   if (!isSupabaseConfigured) {
     return "/pod/pod-sunrise";
   }
 
-  const viewer = await getViewerSession();
+  const viewer = viewerOverride ?? (await getViewerSession());
   if (!viewer) return "/sign-in";
 
   const supabase = await createSupabaseServerClient();
@@ -164,12 +174,24 @@ export async function getDashboardData(
 
   if (!supabase || !viewer) return null;
 
-  const { data: currentMembershipRow } = await supabase
+  const {
+    data: currentMembershipRow,
+    error: currentMembershipError,
+  } = await supabase
     .from("pod_memberships")
     .select("id, pod_id, user_id, role, joined_at")
     .eq("pod_id", podId)
     .eq("user_id", viewer.userId)
     .maybeSingle();
+
+  if (currentMembershipError) {
+    console.error("Failed to load current pod membership", {
+      podId,
+      userId: viewer.userId,
+      error: currentMembershipError,
+    });
+    return null;
+  }
 
   if (!currentMembershipRow) {
     return null;
@@ -258,6 +280,30 @@ export async function getDashboardData(
   const assignmentRows = (assignmentsResult.data ?? []) as Row[];
   const channelRows = (channelsResult.data ?? []) as Row[];
   const deliveryRows = (deliveriesResult.data ?? []) as Row[];
+  const remindersByEventId = new Map<string, Row[]>();
+  const assignmentsByEventId = new Map<string, Row[]>();
+
+  for (const reminderRow of remindersRows) {
+    const eventId = asString(reminderRow.event_id);
+    const eventReminderRows = remindersByEventId.get(eventId);
+
+    if (eventReminderRows) {
+      eventReminderRows.push(reminderRow);
+    } else {
+      remindersByEventId.set(eventId, [reminderRow]);
+    }
+  }
+
+  for (const assignmentRow of assignmentRows) {
+    const eventId = asString(assignmentRow.event_id);
+    const eventAssignmentRows = assignmentsByEventId.get(eventId);
+
+    if (eventAssignmentRows) {
+      eventAssignmentRows.push(assignmentRow);
+    } else {
+      assignmentsByEventId.set(eventId, [assignmentRow]);
+    }
+  }
 
   const profilesByUserId = new Map(
     profileRows.map((row) => {
@@ -310,17 +356,17 @@ export async function getDashboardData(
     currentMembership,
     memberships,
     invites: ((invitesResult.data ?? []) as Row[]).map(mapInvite),
-    events: eventRows.map((row) =>
-      mapEvent(
+    events: eventRows.map((row) => {
+      const eventId = asString(row.id);
+
+      return mapEvent(
         row,
-        remindersRows.filter(
-          (reminderRow) => asString(reminderRow.event_id) === asString(row.id),
-        ),
-        assignmentRows.filter(
-          (assignmentRow) => asString(assignmentRow.event_id) === asString(row.id),
-        ),
-      ),
-    ),
+        (remindersByEventId.get(eventId) ?? [])
+          .map(mapReminder)
+          .filter((reminder): reminder is EventReminder => reminder !== null),
+        (assignmentsByEventId.get(eventId) ?? []).map(mapAssignment),
+      );
+    }),
     channels: channelRows.map(mapChannel),
     deliveries: deliveryRows.map(mapDelivery),
     productReadiness: {

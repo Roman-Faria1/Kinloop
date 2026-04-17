@@ -33,7 +33,7 @@ const featureCards = [
 
 export default async function Home() {
   const viewer = await getViewerSession();
-  const homePath = viewer ? await getViewerHomePath() : "/sign-in";
+  const homePath = viewer ? await getViewerHomePath(viewer) : "/sign-in";
 
   return (
     <main className="relative overflow-hidden">

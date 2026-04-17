@@ -17,7 +17,7 @@ export default async function SignInPage({
   const existingSession = await getViewerSession();
 
   if (existingSession) {
-    redirect(await getViewerHomePath());
+    redirect(await getViewerHomePath(existingSession));
   }
 
   if (isDemoMode) {
