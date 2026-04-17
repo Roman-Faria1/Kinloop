@@ -6,21 +6,34 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
+  const code = requestUrl.searchParams.get("code");
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type") as EmailOtpType | null;
   const nextPath = getSafeRedirectPath(requestUrl.searchParams.get("next"), "/");
 
   const supabase = await createSupabaseServerClient();
-  if (!supabase || !tokenHash || !type) {
+  if (!supabase) {
     return NextResponse.redirect(
       new URL("/sign-in?error=The sign-in link was incomplete.", requestUrl.origin),
     );
   }
 
-  const { error } = await supabase.auth.verifyOtp({
-    token_hash: tokenHash,
-    type,
-  });
+  let error: { message: string } | null = null;
+
+  if (code) {
+    const result = await supabase.auth.exchangeCodeForSession(code);
+    error = result.error;
+  } else if (tokenHash && type) {
+    const result = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type,
+    });
+    error = result.error;
+  } else {
+    return NextResponse.redirect(
+      new URL("/sign-in?error=The sign-in link was incomplete.", requestUrl.origin),
+    );
+  }
 
   if (error) {
     const errorUrl = new URL("/sign-in", requestUrl.origin);
