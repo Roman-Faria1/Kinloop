@@ -14,6 +14,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import type { DashboardData, EventRecord, ReminderOffsetMinutes } from "@/lib/types";
 import { listUpcomingAgenda } from "@/domains/events/service";
 import { canCreateEvents } from "@/domains/auth/roles";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { formatAddress } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
   const agenda = useMemo(() => listUpcomingAgenda(dashboardData), [dashboardData]);
 
   const addEvent = () => {
+    if (!initialData.productReadiness.demoMode) return;
     if (!title.trim()) return;
 
     const start = new Date(startsAt);
@@ -144,13 +146,20 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
                     {initialData.productReadiness.demoMode ? "On" : "Off"}
                   </dd>
                 </div>
+                <div className="flex items-start justify-between gap-4">
+                  <dt className="text-slate-500">Viewer</dt>
+                  <dd className="font-medium">{initialData.viewer.email ?? "Signed in"}</dd>
+                </div>
               </dl>
-              <div className="mt-6 rounded-2xl bg-slate-950 px-4 py-4 text-sm text-slate-100">
-                <p className="font-medium">Immediate pain solved</p>
-                <p className="mt-1 text-slate-300">
-                  One family spot for birthdays, addresses, event ownership,
-                  and short-notice activity alerts.
-                </p>
+              <div className="mt-6 flex items-center justify-between gap-3 rounded-2xl bg-slate-950 px-4 py-4 text-sm text-slate-100">
+                <div>
+                  <p className="font-medium">Immediate pain solved</p>
+                  <p className="mt-1 text-slate-300">
+                    One family spot for birthdays, addresses, event ownership,
+                    and short-notice activity alerts.
+                  </p>
+                </div>
+                {!initialData.productReadiness.demoMode ? <SignOutButton /> : null}
               </div>
             </div>
           </div>
@@ -237,11 +246,22 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
             <Button
               className="w-full"
               onClick={addEvent}
-              disabled={!canCreateEvents(initialData.currentMembership)}
+              disabled={
+                !canCreateEvents(initialData.currentMembership) ||
+                !initialData.productReadiness.demoMode
+              }
             >
               <Plus className="mr-2 size-4" />
-              Add to shared agenda
+              {initialData.productReadiness.demoMode
+                ? "Add to shared agenda"
+                : "Event writes land in the next branch"}
             </Button>
+            {!initialData.productReadiness.demoMode ? (
+              <p className="text-sm text-slate-500">
+                This branch wires real authentication and dashboard persistence.
+                Event mutations are next so we do not fake successful writes.
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </section>

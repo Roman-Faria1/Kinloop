@@ -57,6 +57,12 @@ Important variables:
 
 If Supabase env vars are missing, the UI falls back to seeded demo data.
 
+For Supabase auth to work locally:
+
+- add `http://127.0.0.1:3000/auth/callback` to the project's redirect URLs
+- add `http://localhost:3000/auth/callback` too if you use that host in development
+- use the sign-in page to request a magic link once env vars are configured
+
 ## Domain Model
 
 - `pods`
@@ -73,7 +79,7 @@ The initial SQL lives in [supabase/migrations/0000_famplan_initial.sql](/home/ro
 
 ## Next Steps
 
-1. Create a fresh GitHub remote for this repo and add it locally.
-2. Provision Supabase, Resend, and Inngest.
-3. Replace demo repositories with live database-backed repositories.
-4. Add authenticated server actions for pod creation, invites, and event mutations.
+1. Provision Supabase, Resend, and Inngest.
+2. Apply the SQL migrations, including the profile visibility policy.
+3. Add pod creation and invite acceptance for authenticated users with no membership yet.
+4. Add authenticated event mutations so the live pod composer writes through to Postgres.

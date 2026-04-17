@@ -3,6 +3,8 @@ import { ArrowRight, BellRing, CalendarDays, MapPinned, Users } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getViewerSession } from "@/domains/auth/session";
+import { getViewerHomePath } from "@/domains/pods/repository";
 import { isDemoMode } from "@/lib/env";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +31,10 @@ const featureCards = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const viewer = await getViewerSession();
+  const homePath = viewer ? await getViewerHomePath() : "/sign-in";
+
   return (
     <main className="relative overflow-hidden">
       <div className="absolute inset-x-0 top-0 -z-10 h-[32rem] bg-[radial-gradient(circle_at_top_left,#e3f7ec,transparent_36%),radial-gradient(circle_at_top_right,#fff0c9,transparent_24%),linear-gradient(180deg,#f8f6ef_0%,#f2efe5_100%)]" />
@@ -52,15 +57,26 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link
-              href="/pod/pod-sunrise"
-              className={cn(buttonVariants(), "px-5")}
-            >
-              Open the demo pod
-              <ArrowRight className="ml-2 size-4" />
-            </Link>
+            {isDemoMode ? (
+              <Link
+                href="/pod/pod-sunrise"
+                className={cn(buttonVariants(), "px-5")}
+              >
+                Open the demo pod
+                <ArrowRight className="ml-2 size-4" />
+              </Link>
+            ) : (
+              <Link href={homePath} className={cn(buttonVariants(), "px-5")}>
+                {viewer ? "Open your pod" : "Sign in with email"}
+                <ArrowRight className="ml-2 size-4" />
+              </Link>
+            )}
             <div className="flex items-center rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 ring-1 ring-slate-200">
-              {isDemoMode ? "Running in demo mode until Supabase is configured" : "Live backend configured"}
+              {isDemoMode
+                ? "Running in demo mode until Supabase is configured"
+                : viewer
+                  ? `Signed in as ${viewer.email ?? "family member"}`
+                  : "Live backend configured"}
             </div>
           </div>
         </div>

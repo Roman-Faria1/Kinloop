@@ -205,6 +205,10 @@ const deliveries: NotificationDelivery[] = [
 
 export function createDemoDashboardData(): DashboardData {
   return {
+    viewer: {
+      userId: memberships[0].userId,
+      email: memberships[0].profile.email,
+    },
     pod,
     currentMembership: memberships[0],
     memberships,

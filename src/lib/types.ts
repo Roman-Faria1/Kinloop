@@ -87,6 +87,10 @@ export interface NotificationDelivery {
 }
 
 export interface DashboardData {
+  viewer: {
+    userId: string;
+    email: string | null;
+  };
   pod: Pod;
   currentMembership: PodMembership;
   memberships: PodMembership[];
