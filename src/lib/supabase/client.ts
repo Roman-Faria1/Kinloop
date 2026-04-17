@@ -1,11 +1,13 @@
 import { createBrowserClient } from "@supabase/ssr";
-import { env, isSupabaseConfigured } from "@/lib/env";
 
 export function createSupabaseBrowserClient() {
-  if (!isSupabaseConfigured) return null;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) return null;
 
   return createBrowserClient(
-    env.NEXT_PUBLIC_SUPABASE_URL!,
-    env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
   );
 }

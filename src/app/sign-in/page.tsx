@@ -51,8 +51,8 @@ export default async function SignInPage({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm leading-6 text-slate-600">
-            We are keeping auth intentionally lightweight for the first version:
-            enter your email and we will send a secure sign-in link.
+            Access is invite-only. Enter the email tied to your family pod and we
+            will send a secure sign-in link if that address is approved.
           </p>
           {resolvedSearchParams.error ? (
             <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-900">

@@ -5,6 +5,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  AUTH_RATE_LIMIT_SALT: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   INNGEST_EVENT_KEY: z.string().optional(),
   INNGEST_SIGNING_KEY: z.string().optional(),
@@ -20,6 +21,7 @@ const fallback: z.infer<typeof envSchema> = {
   NEXT_PUBLIC_SUPABASE_URL: undefined,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: undefined,
   SUPABASE_SERVICE_ROLE_KEY: undefined,
+  AUTH_RATE_LIMIT_SALT: undefined,
   DATABASE_URL: undefined,
   INNGEST_EVENT_KEY: undefined,
   INNGEST_SIGNING_KEY: undefined,
@@ -44,3 +46,9 @@ export const isNotificationStackConfigured = Boolean(
 );
 
 export const isDemoMode = !isSupabaseConfigured;
+
+export const isSupabaseAdminConfigured = Boolean(
+  parsed.success &&
+    parsed.data.NEXT_PUBLIC_SUPABASE_URL &&
+    parsed.data.SUPABASE_SERVICE_ROLE_KEY,
+);

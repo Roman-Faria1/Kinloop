@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { LoaderCircle, Mail } from "lucide-react";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 
 interface SignInFormProps {
@@ -14,6 +13,7 @@ export function SignInForm({ nextPath }: SignInFormProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+  const [website, setWebsite] = useState("");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -21,30 +21,32 @@ export function SignInForm({ nextPath }: SignInFormProps) {
     setStatus(null);
     setIsPending(true);
 
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      setError("Supabase is not configured yet in this environment.");
-      setIsPending(false);
-      return;
-    }
-
-    const redirectUrl = new URL("/auth/callback", window.location.origin);
-    redirectUrl.searchParams.set("next", nextPath);
-
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: redirectUrl.toString(),
+    const response = await fetch("/api/auth/request-magic-link", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
       },
+      body: JSON.stringify({
+        email,
+        next: nextPath,
+        website,
+      }),
     });
 
-    if (signInError) {
-      setError(signInError.message);
+    const result = (await response.json().catch(() => null)) as
+      | { error?: string; message?: string }
+      | null;
+
+    if (!response.ok) {
+      setError(result?.error ?? "Unable to send a magic link right now.");
       setIsPending(false);
       return;
     }
 
-    setStatus("Magic link sent. Open the email on this device to finish signing in.");
+    setStatus(
+      result?.message ??
+        "If this email is approved for FamPlan, a magic link will arrive shortly.",
+    );
     setIsPending(false);
   };
 
@@ -63,6 +65,16 @@ export function SignInForm({ nextPath }: SignInFormProps) {
             required
           />
         </div>
+      </label>
+
+      <label className="hidden" aria-hidden="true">
+        <span>Website</span>
+        <input
+          tabIndex={-1}
+          autoComplete="off"
+          value={website}
+          onChange={(inputEvent) => setWebsite(inputEvent.target.value)}
+        />
       </label>
 
       <Button className="w-full" disabled={isPending}>

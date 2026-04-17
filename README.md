@@ -50,6 +50,7 @@ Important variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `AUTH_RATE_LIMIT_SALT`
 - `DATABASE_URL`
 - `INNGEST_EVENT_KEY`
 - `INNGEST_SIGNING_KEY`
@@ -62,6 +63,13 @@ For Supabase auth to work locally:
 - add `http://127.0.0.1:3000/auth/callback` to the project's redirect URLs
 - add `http://localhost:3000/auth/callback` too if you use that host in development
 - use the sign-in page to request a magic link once env vars are configured
+
+Security defaults in the current build:
+
+- invite-only magic-link requests
+- rate limiting for magic-link requests by email and IP hash
+- noindex headers and `robots.txt` disallow while the product is still private
+- security headers for framing, MIME sniffing, and browser permissions
 
 ## Domain Model
 
