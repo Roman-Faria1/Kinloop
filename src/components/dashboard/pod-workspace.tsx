@@ -11,7 +11,12 @@ import {
   Users,
 } from "lucide-react";
 import { formatDistanceToNowStrict } from "date-fns";
-import type { DashboardData, EventRecord, ReminderOffsetMinutes } from "@/lib/types";
+import {
+  REMINDER_OFFSET_MINUTES,
+  type DashboardData,
+  type EventRecord,
+  type ReminderOffsetMinutes,
+} from "@/lib/types";
 import { listUpcomingAgenda } from "@/domains/events/service";
 import { canCreateEvents } from "@/domains/auth/roles";
 import { SignOutButton } from "@/components/auth/sign-out-button";
@@ -29,7 +34,7 @@ interface PodWorkspaceProps {
   initialData: DashboardData;
 }
 
-const reminderOptions: ReminderOffsetMinutes[] = [15, 30, 60, 120, 1440];
+const reminderOptions = [...REMINDER_OFFSET_MINUTES];
 
 export function PodWorkspace({ initialData }: PodWorkspaceProps) {
   const [events, setEvents] = useState(initialData.events);

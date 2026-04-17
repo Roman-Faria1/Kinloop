@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import {
@@ -10,7 +11,12 @@ import {
   normalizeEmail,
 } from "@/domains/auth/magic-links";
 import { getSafeRedirectPath } from "@/domains/auth/session";
-import { env, isSupabaseAdminConfigured, isSupabaseConfigured } from "@/lib/env";
+import {
+  env,
+  isAuthRateLimitConfigured,
+  isSupabaseAdminConfigured,
+  isSupabaseConfigured,
+} from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const requestSchema = z.object({
@@ -20,14 +26,12 @@ const requestSchema = z.object({
 });
 
 async function recordAttempt(params: {
+  adminClient: SupabaseClient;
   emailHash: string;
   ipHash: string;
   outcome: "blocked" | "rate_limited" | "sent" | "failed";
 }) {
-  const adminClient = createSupabaseAdminClient();
-  if (!adminClient) return;
-
-  await adminClient.from("auth_rate_limits").insert({
+  await params.adminClient.from("auth_rate_limits").insert({
     email_hash: params.emailHash,
     ip_hash: params.ipHash,
     outcome: params.outcome,
@@ -39,7 +43,11 @@ function logAuthQueryFailure(message: string, details: Record<string, unknown>) 
 }
 
 export async function POST(request: NextRequest) {
-  if (!isSupabaseConfigured || !isSupabaseAdminConfigured) {
+  if (
+    !isSupabaseConfigured ||
+    !isSupabaseAdminConfigured ||
+    !isAuthRateLimitConfigured
+  ) {
     return NextResponse.json(
       { error: "Sign-in is temporarily unavailable." },
       { status: 503 },
@@ -137,6 +145,7 @@ export async function POST(request: NextRequest) {
     });
 
     await recordAttempt({
+      adminClient,
       emailHash,
       ipHash,
       outcome: "failed",
@@ -158,6 +167,7 @@ export async function POST(request: NextRequest) {
     })
   ) {
     await recordAttempt({
+      adminClient,
       emailHash,
       ipHash,
       outcome: "rate_limited",
@@ -172,6 +182,7 @@ export async function POST(request: NextRequest) {
   const isAllowed = Boolean(matchingProfiles?.length || activeInvites?.length);
   if (!isAllowed) {
     await recordAttempt({
+      adminClient,
       emailHash,
       ipHash,
       outcome: "blocked",
@@ -205,6 +216,7 @@ export async function POST(request: NextRequest) {
   });
 
   await recordAttempt({
+    adminClient,
     emailHash,
     ipHash,
     outcome: error ? "failed" : "sent",

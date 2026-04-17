@@ -12,8 +12,20 @@ export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function getAuthRateLimitSalt() {
+  const salt = env.AUTH_RATE_LIMIT_SALT;
+
+  if (!salt) {
+    throw new Error(
+      "AUTH_RATE_LIMIT_SALT must be set to a server-only secret for magic link rate limiting.",
+    );
+  }
+
+  return salt;
+}
+
 export function hashIdentifier(identifier: string) {
-  const salt = env.AUTH_RATE_LIMIT_SALT ?? env.NEXT_PUBLIC_APP_URL;
+  const salt = getAuthRateLimitSalt();
   return createHash("sha256").update(`${salt}:${identifier}`).digest("hex");
 }
 

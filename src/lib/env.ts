@@ -52,3 +52,7 @@ export const isSupabaseAdminConfigured = Boolean(
     parsed.data.NEXT_PUBLIC_SUPABASE_URL &&
     parsed.data.SUPABASE_SERVICE_ROLE_KEY,
 );
+
+export const isAuthRateLimitConfigured = Boolean(
+  parsed.success && parsed.data.AUTH_RATE_LIMIT_SALT,
+);

@@ -21,33 +21,37 @@ export function SignInForm({ nextPath }: SignInFormProps) {
     setStatus(null);
     setIsPending(true);
 
-    const response = await fetch("/api/auth/request-magic-link", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        next: nextPath,
-        website,
-      }),
-    });
+    try {
+      const response = await fetch("/api/auth/request-magic-link", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          next: nextPath,
+          website,
+        }),
+      });
 
-    const result = (await response.json().catch(() => null)) as
-      | { error?: string; message?: string }
-      | null;
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string }
+        | null;
 
-    if (!response.ok) {
-      setError(result?.error ?? "Unable to send a magic link right now.");
+      if (!response.ok) {
+        setError(result?.error ?? "Unable to send a magic link right now.");
+        return;
+      }
+
+      setStatus(
+        result?.message ??
+          "If this email is approved for FamPlan, a magic link will arrive shortly.",
+      );
+    } catch {
+      setError("Unable to send a magic link right now.");
+    } finally {
       setIsPending(false);
-      return;
     }
-
-    setStatus(
-      result?.message ??
-        "If this email is approved for FamPlan, a magic link will arrive shortly.",
-    );
-    setIsPending(false);
   };
 
   return (

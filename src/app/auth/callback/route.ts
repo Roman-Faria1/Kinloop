@@ -1,10 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { getSafeRedirectPath } from "@/domains/auth/session";
 import { getViewerHomePath } from "@/domains/pods/repository";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-function buildImplicitFlowBridgeHtml() {
+const IMPLICIT_CALLBACK_STATE_COOKIE = "kinloop-implicit-callback-state";
+const IMPLICIT_CALLBACK_STATE_TTL_SECONDS = 5 * 60;
+
+function buildImplicitFlowBridgeHtml(params: { callbackState: string }) {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -40,6 +44,7 @@ function buildImplicitFlowBridgeHtml() {
             body: JSON.stringify({
               accessToken,
               refreshToken,
+              callbackState: ${JSON.stringify(params.callbackState)},
               next,
             }),
           });
@@ -93,12 +98,28 @@ export async function GET(request: Request) {
     });
     error = result.error;
   } else {
-    return new NextResponse(buildImplicitFlowBridgeHtml(), {
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
+    const callbackState = randomUUID();
+    const response = new NextResponse(
+      buildImplicitFlowBridgeHtml({ callbackState }),
+      {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        },
       },
+    );
+
+    response.cookies.set({
+      name: IMPLICIT_CALLBACK_STATE_COOKIE,
+      value: callbackState,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: requestUrl.protocol === "https:",
+      path: "/api/auth/complete-implicit",
+      maxAge: IMPLICIT_CALLBACK_STATE_TTL_SECONDS,
     });
+
+    return response;
   }
 
   if (error) {

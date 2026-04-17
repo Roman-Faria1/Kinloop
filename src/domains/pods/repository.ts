@@ -13,11 +13,11 @@ import type {
   PodMembership,
   Profile,
 } from "@/lib/types";
+import { REMINDER_OFFSET_MINUTES } from "@/lib/types";
 import { getViewerSession } from "@/domains/auth/session";
 
 type Row = Record<string, unknown>;
-const reminderOffsetMinutesValues = [15, 30, 60, 120, 1440] as const;
-const validReminderOffsetMinutes = new Set<number>(reminderOffsetMinutesValues);
+const validReminderOffsetMinutes = new Set<number>(REMINDER_OFFSET_MINUTES);
 
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
