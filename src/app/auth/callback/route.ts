@@ -1,26 +1,126 @@
+import { randomUUID } from "node:crypto";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { getSafeRedirectPath } from "@/domains/auth/session";
 import { getViewerHomePath } from "@/domains/pods/repository";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+const IMPLICIT_CALLBACK_STATE_COOKIE = "kinloop-implicit-callback-state";
+const IMPLICIT_CALLBACK_STATE_TTL_SECONDS = 5 * 60;
+
+function buildImplicitFlowBridgeHtml(params: { callbackState: string }) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Signing you in...</title>
+  </head>
+  <body>
+    <script>
+      (async function () {
+        const fallback = (message) => {
+          const errorUrl = new URL("/sign-in", window.location.origin);
+          errorUrl.searchParams.set("error", message);
+          window.location.replace(errorUrl.toString());
+        };
+
+        const hash = new URLSearchParams(window.location.hash.slice(1));
+        const accessToken = hash.get("access_token");
+        const refreshToken = hash.get("refresh_token");
+        const next = new URLSearchParams(window.location.search).get("next") || "/";
+
+        if (!accessToken || !refreshToken) {
+          fallback("The sign-in link was incomplete.");
+          return;
+        }
+
+        try {
+          const response = await fetch("/api/auth/complete-implicit", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              accessToken,
+              refreshToken,
+              callbackState: ${JSON.stringify(params.callbackState)},
+              next,
+            }),
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || typeof payload.destination !== "string") {
+            throw new Error(
+              typeof payload.error === "string"
+                ? payload.error
+                : "Unable to complete sign-in.",
+            );
+          }
+
+          window.location.replace(payload.destination);
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "Unable to complete sign-in.";
+          fallback(message);
+        }
+      })();
+    </script>
+  </body>
+</html>`;
+}
+
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
+  const code = requestUrl.searchParams.get("code");
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type") as EmailOtpType | null;
   const nextPath = getSafeRedirectPath(requestUrl.searchParams.get("next"), "/");
 
   const supabase = await createSupabaseServerClient();
-  if (!supabase || !tokenHash || !type) {
+  if (!supabase) {
     return NextResponse.redirect(
       new URL("/sign-in?error=The sign-in link was incomplete.", requestUrl.origin),
     );
   }
 
-  const { error } = await supabase.auth.verifyOtp({
-    token_hash: tokenHash,
-    type,
-  });
+  let error: { message: string } | null = null;
+
+  if (code) {
+    const result = await supabase.auth.exchangeCodeForSession(code);
+    error = result.error;
+  } else if (tokenHash && type) {
+    const result = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type,
+    });
+    error = result.error;
+  } else {
+    const callbackState = randomUUID();
+    const response = new NextResponse(
+      buildImplicitFlowBridgeHtml({ callbackState }),
+      {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      },
+    );
+
+    response.cookies.set({
+      name: IMPLICIT_CALLBACK_STATE_COOKIE,
+      value: callbackState,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: requestUrl.protocol === "https:",
+      path: "/api/auth/complete-implicit",
+      maxAge: IMPLICIT_CALLBACK_STATE_TTL_SECONDS,
+    });
+
+    return response;
+  }
 
   if (error) {
     const errorUrl = new URL("/sign-in", requestUrl.origin);

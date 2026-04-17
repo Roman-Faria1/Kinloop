@@ -2,7 +2,8 @@ export type PodRole = "owner" | "adult" | "member";
 export type EventKind = "standard" | "quick_plan" | "birthday";
 export type DeliveryStatus = "pending" | "sent" | "failed" | "acknowledged";
 export type NotificationChannelKind = "push" | "email";
-export type ReminderOffsetMinutes = 15 | 30 | 60 | 120 | 1440;
+export const REMINDER_OFFSET_MINUTES = [15, 30, 60, 120, 1440] as const;
+export type ReminderOffsetMinutes = (typeof REMINDER_OFFSET_MINUTES)[number];
 
 export interface Pod {
   id: string;

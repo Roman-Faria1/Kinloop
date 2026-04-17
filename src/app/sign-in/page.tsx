@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSafeRedirectPath, getViewerSession } from "@/domains/auth/session";
 import { getViewerHomePath } from "@/domains/pods/repository";
-import { isDemoMode } from "@/lib/env";
+import { isAuthRequestFlowConfigured, isDemoMode } from "@/lib/env";
 
 export default async function SignInPage({
   searchParams,
@@ -17,21 +17,22 @@ export default async function SignInPage({
   const existingSession = await getViewerSession();
 
   if (existingSession) {
-    redirect(await getViewerHomePath());
+    redirect(await getViewerHomePath(existingSession));
   }
 
-  if (isDemoMode) {
+  if (isDemoMode || !isAuthRequestFlowConfigured) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-16 sm:px-6">
         <Card className="w-full">
           <CardHeader>
             <Badge variant="accent">Demo mode</Badge>
-            <CardTitle>Supabase auth is not configured here yet.</CardTitle>
+            <CardTitle>Magic-link auth is not fully configured here yet.</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-600">
             <p>
-              Add the Supabase environment variables in `.env.local` to enable real
-              sign-in. Until then, you can keep using the seeded demo pod.
+              Add the Supabase client and admin environment variables, plus
+              `AUTH_RATE_LIMIT_SALT`, in `.env.local` to enable real sign-in.
+              Until then, you can keep using the seeded demo pod.
             </p>
             <Link className="text-emerald-700 underline" href="/pod/pod-sunrise">
               Open the demo pod
@@ -51,8 +52,8 @@ export default async function SignInPage({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm leading-6 text-slate-600">
-            We are keeping auth intentionally lightweight for the first version:
-            enter your email and we will send a secure sign-in link.
+            Access is invite-only. Enter the email tied to your family pod and we
+            will send a secure sign-in link if that address is approved.
           </p>
           {resolvedSearchParams.error ? (
             <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-900">

@@ -131,3 +131,13 @@ export const notificationDeliveries = pgTable(
     ),
   }),
 );
+
+export const authRateLimits = pgTable("auth_rate_limits", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  emailHash: text("email_hash").notNull(),
+  ipHash: text("ip_hash").notNull(),
+  outcome: text("outcome").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
