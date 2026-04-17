@@ -102,15 +102,6 @@ export async function GET(request: Request) {
   }
 
   if (error) {
-    if (!code && !tokenHash) {
-      return new NextResponse(buildImplicitFlowBridgeHtml(), {
-        headers: {
-          "content-type": "text/html; charset=utf-8",
-          "cache-control": "no-store",
-        },
-      });
-    }
-
     const errorUrl = new URL("/sign-in", requestUrl.origin);
     errorUrl.searchParams.set("error", error.message);
     return NextResponse.redirect(errorUrl);

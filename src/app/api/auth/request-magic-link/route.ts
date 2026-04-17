@@ -34,6 +34,10 @@ async function recordAttempt(params: {
   });
 }
 
+function logAuthQueryFailure(message: string, details: Record<string, unknown>) {
+  console.error(message, details);
+}
+
 export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured || !isSupabaseAdminConfigured) {
     return NextResponse.json(
@@ -78,10 +82,22 @@ export async function POST(request: NextRequest) {
   ).toISOString();
 
   const [
-    { count: rawEmailAttemptCount },
-    { count: rawIpAttemptCount },
-    { data: matchingProfiles },
-    { data: activeInvites },
+    {
+      count: rawEmailAttemptCount,
+      error: emailAttemptCountError,
+    },
+    {
+      count: rawIpAttemptCount,
+      error: ipAttemptCountError,
+    },
+    {
+      data: matchingProfiles,
+      error: matchingProfilesError,
+    },
+    {
+      data: activeInvites,
+      error: activeInvitesError,
+    },
   ] = await Promise.all([
     adminClient
       .from("auth_rate_limits")
@@ -96,16 +112,41 @@ export async function POST(request: NextRequest) {
     adminClient
       .from("profiles")
       .select("id")
-      .ilike("email", normalizedEmail)
+      .eq("email", normalizedEmail)
       .limit(1),
     adminClient
       .from("invites")
       .select("id")
-      .ilike("email", normalizedEmail)
+      .eq("email", normalizedEmail)
       .is("revoked_at", null)
       .gt("expires_at", new Date().toISOString())
       .limit(1),
   ]);
+
+  if (
+    emailAttemptCountError ||
+    ipAttemptCountError ||
+    matchingProfilesError ||
+    activeInvitesError
+  ) {
+    logAuthQueryFailure("Failed to load auth rate-limit or allowlist state", {
+      emailAttemptCountError,
+      ipAttemptCountError,
+      matchingProfilesError,
+      activeInvitesError,
+    });
+
+    await recordAttempt({
+      emailHash,
+      ipHash,
+      outcome: "failed",
+    });
+
+    return NextResponse.json(
+      { error: "Sign-in is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
 
   const emailAttemptCount = rawEmailAttemptCount ?? 0;
   const ipAttemptCount = rawIpAttemptCount ?? 0;
