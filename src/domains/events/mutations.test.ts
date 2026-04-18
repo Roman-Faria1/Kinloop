@@ -231,8 +231,8 @@ describe("event mutations", () => {
         reminderOffsetMinutes: 60,
       }),
     ).rejects.toMatchObject({
-      message: "Birthday reminders are managed from profiles.",
-      status: 400,
+      message: "You do not have permission to edit that event.",
+      status: 403,
     });
   });
 

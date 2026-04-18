@@ -24,9 +24,13 @@ export function canInviteRole(
 
 export function canEditEvent(
   actor: Pick<PodMembership, "role" | "id">,
-  event: Pick<EventRecord, "creatorMembershipId" | "eventKind">,
+  event: {
+    creatorMembershipId: EventRecord["creatorMembershipId"] | null;
+    eventKind: EventRecord["eventKind"];
+  },
 ) {
+  if (event.eventKind === "birthday") return false;
   if (actor.role === "owner") return true;
   if (event.creatorMembershipId === actor.id) return true;
-  return actor.role === "adult" && event.eventKind !== "birthday";
+  return actor.role === "adult";
 }

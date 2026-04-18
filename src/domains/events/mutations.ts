@@ -15,7 +15,7 @@ interface ActorMembership {
 interface ManagedEventRow {
   id: string;
   pod_id: string;
-  creator_membership_id: string;
+  creator_membership_id: string | null;
   starts_at: string;
   ends_at: string;
   event_kind: EventKind;
