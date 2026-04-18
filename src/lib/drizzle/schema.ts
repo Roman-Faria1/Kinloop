@@ -87,11 +87,17 @@ export const eventAssignments = pgTable("event_assignments", {
     .notNull(),
 });
 
-export const eventReminders = pgTable("event_reminders", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  eventId: uuid("event_id").references(() => events.id, { onDelete: "cascade" }).notNull(),
-  offsetMinutes: text("offset_minutes").notNull(),
-});
+export const eventReminders = pgTable(
+  "event_reminders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    eventId: uuid("event_id").references(() => events.id, { onDelete: "cascade" }).notNull(),
+    offsetMinutes: text("offset_minutes").notNull(),
+  },
+  (table) => ({
+    uniqueEventReminder: uniqueIndex("event_reminders_event_id_idx").on(table.eventId),
+  }),
+);
 
 export const notificationChannels = pgTable(
   "notification_channels",

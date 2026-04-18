@@ -36,4 +36,22 @@ describe("role checks", () => {
       ),
     ).toBe(false);
   });
+
+  it("prevents owners from editing birthday events in the event mutation flow", () => {
+    expect(
+      canEditEvent(
+        { id: "membership-owner", role: "owner" },
+        { creatorMembershipId: "membership-owner", eventKind: "birthday" },
+      ),
+    ).toBe(false);
+  });
+
+  it("handles events whose creator membership has been deleted", () => {
+    expect(
+      canEditEvent(
+        { id: "membership-adult", role: "adult" },
+        { creatorMembershipId: null, eventKind: "standard" },
+      ),
+    ).toBe(true);
+  });
 });

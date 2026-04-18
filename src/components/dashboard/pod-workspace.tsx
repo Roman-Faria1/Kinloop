@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BellRing,
@@ -21,7 +21,7 @@ import {
 } from "@/lib/types";
 import { buildInviteLink, isInviteExpired } from "@/domains/pods/invites";
 import { listUpcomingAgenda } from "@/domains/events/service";
-import { canCreateEvents, canInviteRole } from "@/domains/auth/roles";
+import { canCreateEvents, canEditEvent, canInviteRole } from "@/domains/auth/roles";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { formatAddress } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -39,16 +39,55 @@ interface PodWorkspaceProps {
 
 const reminderOptions = [...REMINDER_OFFSET_MINUTES];
 
+function sortEvents(events: EventRecord[]) {
+  return [...events].sort(
+    (left, right) =>
+      new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+  );
+}
+
+function toDateTimeLocalValue(isoString: string) {
+  const value = new Date(isoString);
+
+  if (Number.isNaN(value.getTime())) {
+    return "";
+  }
+
+  const localValue = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
+  return localValue.toISOString().slice(0, 16);
+}
+
+function getDefaultStartsAt() {
+  const nextSlot = new Date();
+  nextSlot.setSeconds(0, 0);
+
+  const roundedMinutes = Math.ceil(nextSlot.getMinutes() / 30) * 30;
+
+  if (roundedMinutes === 60) {
+    nextSlot.setHours(nextSlot.getHours() + 1, 0, 0, 0);
+  } else {
+    nextSlot.setMinutes(roundedMinutes, 0, 0);
+  }
+
+  return toDateTimeLocalValue(nextSlot.toISOString());
+}
+
 export function PodWorkspace({ initialData }: PodWorkspaceProps) {
   const router = useRouter();
   const [events, setEvents] = useState(initialData.events);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [startsAt, setStartsAt] = useState("2026-04-21T17:30");
+  const [location, setLocation] = useState("");
+  const [startsAt, setStartsAt] = useState(getDefaultStartsAt);
   const [eventKind, setEventKind] =
     useState<EventRecord["eventKind"]>("quick_plan");
   const [offsetMinutes, setOffsetMinutes] =
     useState<ReminderOffsetMinutes>(15);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [eventStatus, setEventStatus] = useState<string | null>(null);
+  const [eventError, setEventError] = useState<string | null>(null);
+  const [isSavingEvent, setIsSavingEvent] = useState(false);
+  const [cancellingEventId, setCancellingEventId] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<PodRole>("member");
   const [inviteStatus, setInviteStatus] = useState<string | null>(null);
@@ -57,6 +96,10 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
   const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEvents(initialData.events);
+  }, [initialData.events]);
 
   const dashboardData = useMemo(
     () => ({
@@ -74,21 +117,37 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
       ),
     [initialData.currentMembership],
   );
+  const editingEvent = useMemo(
+    () =>
+      editingEventId
+        ? events.find((event) => event.id === editingEventId) ?? null
+        : null,
+    [editingEventId, events],
+  );
+
+  const resetEventComposer = () => {
+    setEditingEventId(null);
+    setTitle("");
+    setNotes("");
+    setLocation("");
+    setStartsAt(getDefaultStartsAt());
+    setEventKind("quick_plan");
+    setOffsetMinutes(15);
+  };
 
   const addEvent = () => {
-    if (!initialData.productReadiness.demoMode) return;
     if (!title.trim()) return;
 
     const start = new Date(startsAt);
     const end = new Date(start.getTime() + 60 * 60 * 1000);
 
     const nextEvent: EventRecord = {
-      id: `local-${crypto.randomUUID()}`,
+      id: editingEventId ?? `local-${crypto.randomUUID()}`,
       podId: initialData.pod.id,
       creatorMembershipId: initialData.currentMembership.id,
       title: title.trim(),
       notes: notes.trim(),
-      location: eventKind === "quick_plan" ? "Shared family alert" : "TBD",
+      location: location.trim() || (eventKind === "quick_plan" ? "Shared family alert" : "TBD"),
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
       timezone: initialData.pod.timezone,
@@ -104,14 +163,156 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
     };
 
     setEvents((current) =>
-      [...current, nextEvent].sort(
-        (left, right) =>
-          new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+      sortEvents(
+        editingEventId
+          ? current.map((event) => (event.id === editingEventId ? nextEvent : event))
+          : [...current, nextEvent],
       ),
     );
 
-    setTitle("");
-    setNotes("");
+    setEventStatus(
+      editingEventId
+        ? "Updated the shared agenda item in demo mode."
+        : "Added the shared agenda item in demo mode.",
+    );
+    setEventError(null);
+    resetEventComposer();
+  };
+
+  const startEditingEvent = (event: EventRecord) => {
+    setEditingEventId(event.id);
+    setTitle(event.title);
+    setNotes(event.notes);
+    setLocation(event.location ?? "");
+    setStartsAt(toDateTimeLocalValue(event.startsAt));
+    setEventKind(event.eventKind === "birthday" ? "standard" : event.eventKind);
+    setOffsetMinutes(event.reminderRules[0]?.offsetMinutes ?? 15);
+    setEventError(null);
+    setEventStatus(null);
+  };
+
+  const submitEvent = async () => {
+    if (!title.trim()) {
+      setEventError("Add a title before saving.");
+      return;
+    }
+
+    if (initialData.productReadiness.demoMode) {
+      addEvent();
+      return;
+    }
+
+    setEventError(null);
+    setEventStatus(null);
+    setIsSavingEvent(true);
+
+    const parsedStart = new Date(startsAt);
+
+    if (Number.isNaN(parsedStart.getTime())) {
+      setEventError("Choose a valid start time before saving.");
+      setIsSavingEvent(false);
+      return;
+    }
+
+    const payload = {
+      title,
+      notes,
+      location,
+      startsAt: parsedStart.toISOString(),
+      eventKind,
+      reminderOffsetMinutes: offsetMinutes,
+    };
+
+    try {
+      const response = await fetch(
+        editingEventId
+          ? `/api/pods/${initialData.pod.id}/events/${editingEventId}`
+          : `/api/pods/${initialData.pod.id}/events`,
+        {
+          method: editingEventId ? "PATCH" : "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(
+            editingEventId
+              ? {
+                  action: "update",
+                  ...payload,
+                }
+              : payload,
+          ),
+        },
+      );
+
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        setEventError(result?.error ?? "Unable to save that event.");
+        return;
+      }
+
+      setEventStatus(
+        editingEventId
+          ? "Updated the shared agenda item."
+          : "Added the shared agenda item to the pod.",
+      );
+      resetEventComposer();
+      router.refresh();
+    } catch {
+      setEventError("Unable to save that event.");
+    } finally {
+      setIsSavingEvent(false);
+    }
+  };
+
+  const cancelEvent = async (eventId: string) => {
+    if (initialData.productReadiness.demoMode) {
+      setEventError(null);
+      setEventStatus(null);
+      setEvents((current) =>
+        current.map((event) =>
+          event.id === eventId ? { ...event, isCancelled: true } : event,
+        ),
+      );
+      setEventStatus("Cancelled the agenda item in demo mode.");
+      return;
+    }
+
+    setEventError(null);
+    setEventStatus(null);
+    setCancellingEventId(eventId);
+
+    try {
+      const response = await fetch(`/api/pods/${initialData.pod.id}/events/${eventId}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        setEventError(result?.error ?? "Unable to cancel that event.");
+        return;
+      }
+
+      if (editingEventId === eventId) {
+        resetEventComposer();
+      }
+
+      setEventStatus("Cancelled the agenda item.");
+      router.refresh();
+    } catch {
+      setEventError("Unable to cancel that event.");
+    } finally {
+      setCancellingEventId(null);
+    }
   };
 
   const submitInvite = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -302,6 +503,16 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
               />
             </label>
 
+            <label className="block space-y-2">
+              <span className="text-sm font-medium text-slate-700">Location</span>
+              <input
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-emerald-500"
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+                placeholder="Shared family alert, Nana's house, school gym..."
+              />
+            </label>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-slate-700">Type</span>
@@ -349,23 +560,44 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
               />
             </label>
 
-            <Button
+              <Button
               className="w-full"
-              onClick={addEvent}
+              onClick={() => void submitEvent()}
               disabled={
-                !canCreateEvents(initialData.currentMembership) ||
-                !initialData.productReadiness.demoMode
+                isSavingEvent ||
+                (editingEventId
+                  ? !editingEvent ||
+                    !canEditEvent(initialData.currentMembership, editingEvent)
+                  : !canCreateEvents(initialData.currentMembership))
               }
             >
               <Plus className="mr-2 size-4" />
-              {initialData.productReadiness.demoMode
-                ? "Add to shared agenda"
-                : "Event writes land in the next branch"}
+              {isSavingEvent
+                ? editingEventId
+                  ? "Saving changes..."
+                  : "Saving event..."
+                : editingEventId
+                  ? "Save changes"
+                  : "Add to shared agenda"}
             </Button>
-            {!initialData.productReadiness.demoMode ? (
-              <p className="text-sm text-slate-500">
-                This branch wires real authentication and dashboard persistence.
-                Event mutations are next so we do not fake successful writes.
+            {editingEventId ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={resetEventComposer}
+              >
+                Cancel editing
+              </Button>
+            ) : null}
+            {eventStatus ? (
+              <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                {eventStatus}
+              </p>
+            ) : null}
+            {eventError ? (
+              <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                {eventError}
               </p>
             ) : null}
           </CardContent>
@@ -387,35 +619,63 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {agenda.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-start justify-between gap-4 rounded-[1.5rem] border border-slate-100 bg-slate-50 px-4 py-4"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-slate-900">{item.title}</p>
-                    <Badge
-                      variant={
-                        item.eventKind === "quick_plan"
-                          ? "accent"
-                          : item.eventKind === "birthday"
-                            ? "success"
-                            : "neutral"
-                      }
-                    >
-                      {item.badge}
-                    </Badge>
+            {agenda.map((item) => {
+              const event = events.find((currentEvent) => currentEvent.id === item.id);
+              const canManageEvent = event
+                ? canEditEvent(initialData.currentMembership, event)
+                : false;
+
+              return (
+                <div
+                  key={item.id}
+                  className="rounded-[1.5rem] border border-slate-100 bg-slate-50 px-4 py-4"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-slate-900">{item.title}</p>
+                        <Badge
+                          variant={
+                            item.eventKind === "quick_plan"
+                              ? "accent"
+                              : item.eventKind === "birthday"
+                                ? "success"
+                                : "neutral"
+                          }
+                        >
+                          {item.badge}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-slate-600">{item.subtitle}</p>
+                    </div>
+                    <p className="shrink-0 text-xs uppercase tracking-[0.2em] text-slate-400">
+                      {formatDistanceToNowStrict(new Date(item.startsAt), {
+                        addSuffix: true,
+                      })}
+                    </p>
                   </div>
-                  <p className="text-sm text-slate-600">{item.subtitle}</p>
+                  {event && canManageEvent ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => startEditingEvent(event)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={cancellingEventId === event.id}
+                        onClick={() => void cancelEvent(event.id)}
+                      >
+                        {cancellingEventId === event.id ? "Cancelling..." : "Cancel"}
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
-                <p className="shrink-0 text-xs uppercase tracking-[0.2em] text-slate-400">
-                  {formatDistanceToNowStrict(new Date(item.startsAt), {
-                    addSuffix: true,
-                  })}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
 
@@ -650,7 +910,7 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
                 <li>Next.js app shell with agenda-first workspace</li>
                 <li>Domain model, Drizzle schema, and SQL migration</li>
                 <li>Reminder scheduling logic and Inngest endpoint</li>
-                <li>Tests for reminder, invite, role, and birthday behavior</li>
+                <li>Persistent event create, edit, and cancel flows</li>
               </ul>
             </div>
             <div className="rounded-[1.5rem] border border-amber-100 bg-amber-50 p-4">
@@ -661,7 +921,7 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
                 <li>Supabase project and auth wiring</li>
                 <li>Web push subscription storage</li>
                 <li>Resend domain verification</li>
-                <li>Server actions for persistent event mutations</li>
+                <li>Reminder delivery orchestration on event writes</li>
               </ul>
             </div>
           </CardContent>
