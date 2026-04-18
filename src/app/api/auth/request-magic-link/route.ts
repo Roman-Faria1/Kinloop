@@ -217,7 +217,7 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  const redirectUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL);
+  const redirectUrl = new URL("/auth/callback", request.nextUrl.origin);
   redirectUrl.searchParams.set("next", nextPath);
 
   const { error } = await authClient.auth.signInWithOtp({
