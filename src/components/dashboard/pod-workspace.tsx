@@ -57,13 +57,28 @@ function toDateTimeLocalValue(isoString: string) {
   return localValue.toISOString().slice(0, 16);
 }
 
+function getDefaultStartsAt() {
+  const nextSlot = new Date();
+  nextSlot.setSeconds(0, 0);
+
+  const roundedMinutes = Math.ceil(nextSlot.getMinutes() / 30) * 30;
+
+  if (roundedMinutes === 60) {
+    nextSlot.setHours(nextSlot.getHours() + 1, 0, 0, 0);
+  } else {
+    nextSlot.setMinutes(roundedMinutes, 0, 0);
+  }
+
+  return toDateTimeLocalValue(nextSlot.toISOString());
+}
+
 export function PodWorkspace({ initialData }: PodWorkspaceProps) {
   const router = useRouter();
   const [events, setEvents] = useState(initialData.events);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState("");
-  const [startsAt, setStartsAt] = useState("2026-04-21T17:30");
+  const [startsAt, setStartsAt] = useState(getDefaultStartsAt);
   const [eventKind, setEventKind] =
     useState<EventRecord["eventKind"]>("quick_plan");
   const [offsetMinutes, setOffsetMinutes] =
@@ -115,7 +130,7 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
     setTitle("");
     setNotes("");
     setLocation("");
-    setStartsAt("2026-04-21T17:30");
+    setStartsAt(getDefaultStartsAt());
     setEventKind("quick_plan");
     setOffsetMinutes(15);
   };
@@ -254,6 +269,8 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
 
   const cancelEvent = async (eventId: string) => {
     if (initialData.productReadiness.demoMode) {
+      setEventError(null);
+      setEventStatus(null);
       setEvents((current) =>
         current.map((event) =>
           event.id === eventId ? { ...event, isCancelled: true } : event,
