@@ -13,6 +13,15 @@ export function canCreateEvents(actor: Pick<PodMembership, "role">) {
   return actor.role === "owner" || actor.role === "adult";
 }
 
+export function canInviteRole(
+  actor: Pick<PodMembership, "role">,
+  targetRole: PodMembership["role"],
+) {
+  if (actor.role === "owner") return true;
+  if (actor.role === "adult") return targetRole === "member";
+  return false;
+}
+
 export function canEditEvent(
   actor: Pick<PodMembership, "role" | "id">,
   event: Pick<EventRecord, "creatorMembershipId" | "eventKind">,

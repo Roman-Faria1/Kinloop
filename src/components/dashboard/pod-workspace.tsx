@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   BellRing,
   CalendarDays,
@@ -15,10 +16,12 @@ import {
   REMINDER_OFFSET_MINUTES,
   type DashboardData,
   type EventRecord,
+  type PodRole,
   type ReminderOffsetMinutes,
 } from "@/lib/types";
+import { buildInviteLink, isInviteExpired } from "@/domains/pods/invites";
 import { listUpcomingAgenda } from "@/domains/events/service";
-import { canCreateEvents } from "@/domains/auth/roles";
+import { canCreateEvents, canInviteRole } from "@/domains/auth/roles";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { formatAddress } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +40,7 @@ interface PodWorkspaceProps {
 const reminderOptions = [...REMINDER_OFFSET_MINUTES];
 
 export function PodWorkspace({ initialData }: PodWorkspaceProps) {
+  const router = useRouter();
   const [events, setEvents] = useState(initialData.events);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -45,6 +49,14 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
     useState<EventRecord["eventKind"]>("quick_plan");
   const [offsetMinutes, setOffsetMinutes] =
     useState<ReminderOffsetMinutes>(15);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<PodRole>("member");
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const dashboardData = useMemo(
     () => ({
@@ -55,6 +67,13 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
   );
 
   const agenda = useMemo(() => listUpcomingAgenda(dashboardData), [dashboardData]);
+  const inviteRoleOptions = useMemo(
+    () =>
+      (["member", "adult", "owner"] as const).filter((role) =>
+        canInviteRole(initialData.currentMembership, role),
+      ),
+    [initialData.currentMembership],
+  );
 
   const addEvent = () => {
     if (!initialData.productReadiness.demoMode) return;
@@ -93,6 +112,88 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
 
     setTitle("");
     setNotes("");
+  };
+
+  const submitInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setInviteError(null);
+    setInviteStatus(null);
+    setIsSubmittingInvite(true);
+
+    try {
+      const response = await fetch(`/api/pods/${initialData.pod.id}/invites`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: inviteEmail,
+          role: inviteRole,
+        }),
+      });
+
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        setInviteError(result?.error ?? "Unable to create that invite.");
+        return;
+      }
+
+      setInviteEmail("");
+      setInviteRole("member");
+      setInviteStatus("Invite created. The pending list will refresh now.");
+      router.refresh();
+    } catch {
+      setInviteError("Unable to create that invite.");
+    } finally {
+      setIsSubmittingInvite(false);
+    }
+  };
+
+  const copyInviteLink = async (inviteId: string, token: string) => {
+    try {
+      const inviteLink = buildInviteLink(
+        { id: initialData.pod.id },
+        token,
+        window.location.origin,
+      );
+      await navigator.clipboard.writeText(inviteLink);
+      setCopiedInviteId(inviteId);
+      window.setTimeout(() => setCopiedInviteId(null), 2500);
+    } catch {
+      setInviteError("Unable to copy that invite link right now.");
+    }
+  };
+
+  const revokeInvite = async (inviteId: string) => {
+    setRevokeError(null);
+    setRevokingInviteId(inviteId);
+
+    try {
+      const response = await fetch(
+        `/api/pods/${initialData.pod.id}/invites/${inviteId}/revoke`,
+        {
+          method: "POST",
+        },
+      );
+
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        setRevokeError(result?.error ?? "Unable to revoke that invite.");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setRevokeError("Unable to revoke that invite.");
+    } finally {
+      setRevokingInviteId(null);
+    }
   };
 
   return (
@@ -415,6 +516,68 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {!initialData.productReadiness.demoMode &&
+            inviteRoleOptions.length > 0 ? (
+              <form
+                className="space-y-3 rounded-[1.5rem] border border-slate-100 bg-slate-50 p-4"
+                onSubmit={submitInvite}
+              >
+                <p className="font-medium text-slate-900">Invite someone new</p>
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-700">
+                    Email address
+                  </span>
+                  <input
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-emerald-500"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    placeholder="cousin@example.com"
+                    required
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-700">Role</span>
+                  <select
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-emerald-500"
+                    value={inviteRole}
+                    onChange={(event) =>
+                      setInviteRole(event.target.value as typeof inviteRole)
+                    }
+                  >
+                    {inviteRoleOptions.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <Button className="w-full" disabled={isSubmittingInvite}>
+                  {isSubmittingInvite ? "Creating invite..." : "Create invite"}
+                </Button>
+
+                {inviteStatus ? (
+                  <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                    {inviteStatus}
+                  </p>
+                ) : null}
+
+                {inviteError ? (
+                  <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                    {inviteError}
+                  </p>
+                ) : null}
+              </form>
+            ) : null}
+
+            {initialData.invites.length === 0 ? (
+              <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No pending invites yet.
+              </div>
+            ) : null}
+
             {initialData.invites.map((invite) => (
               <div
                 key={invite.id}
@@ -424,13 +587,44 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
                   <div>
                     <p className="font-medium text-slate-900">{invite.email}</p>
                     <p className="mt-1 text-sm text-slate-600">
-                      Invite expires {new Date(invite.expiresAt).toLocaleString()}
+                      {isInviteExpired(invite)
+                        ? "Invite is no longer active"
+                        : `Invite expires ${new Date(invite.expiresAt).toLocaleString()}`}
                     </p>
                   </div>
                   <Badge>{invite.role}</Badge>
                 </div>
+                {!initialData.productReadiness.demoMode && !isInviteExpired(invite) ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void copyInviteLink(invite.id, invite.token)}
+                    >
+                      {copiedInviteId === invite.id ? "Copied" : "Copy join link"}
+                    </Button>
+                    {inviteRoleOptions.length > 0 ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={revokingInviteId === invite.id}
+                        onClick={() => void revokeInvite(invite.id)}
+                      >
+                        {revokingInviteId === invite.id
+                          ? "Revoking..."
+                          : "Revoke invite"}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ))}
+
+            {revokeError ? (
+              <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                {revokeError}
+              </p>
+            ) : null}
 
             <div className="rounded-[1.5rem] bg-slate-950 p-4 text-sm text-slate-200">
               <p className="font-medium text-white">Role model for v1</p>
