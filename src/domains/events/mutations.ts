@@ -140,21 +140,17 @@ async function replaceReminderRule(
   eventId: string,
   reminderOffsetMinutes: ReminderOffsetMinutes,
 ) {
-  const { error: deleteError } = await adminClient
-    .from("event_reminders")
-    .delete()
-    .eq("event_id", eventId);
+  const { error: upsertError } = await adminClient.from("event_reminders").upsert(
+    {
+      event_id: eventId,
+      offset_minutes: String(reminderOffsetMinutes),
+    },
+    {
+      onConflict: "event_id",
+    },
+  );
 
-  if (deleteError) {
-    throw new EventMutationError("Unable to update reminder timing right now.", 500);
-  }
-
-  const { error: insertError } = await adminClient.from("event_reminders").insert({
-    event_id: eventId,
-    offset_minutes: String(reminderOffsetMinutes),
-  });
-
-  if (insertError) {
+  if (upsertError) {
     throw new EventMutationError("Unable to update reminder timing right now.", 500);
   }
 }

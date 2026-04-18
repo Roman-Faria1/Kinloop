@@ -102,6 +102,13 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
       ),
     [initialData.currentMembership],
   );
+  const editingEvent = useMemo(
+    () =>
+      editingEventId
+        ? events.find((event) => event.id === editingEventId) ?? null
+        : null,
+    [editingEventId, events],
+  );
 
   const resetEventComposer = () => {
     setEditingEventId(null);
@@ -536,11 +543,15 @@ export function PodWorkspace({ initialData }: PodWorkspaceProps) {
               />
             </label>
 
-            <Button
+              <Button
               className="w-full"
               onClick={() => void submitEvent()}
               disabled={
-                !canCreateEvents(initialData.currentMembership) || isSavingEvent
+                isSavingEvent ||
+                (editingEventId
+                  ? !editingEvent ||
+                    !canEditEvent(initialData.currentMembership, editingEvent)
+                  : !canCreateEvents(initialData.currentMembership))
               }
             >
               <Plus className="mr-2 size-4" />
