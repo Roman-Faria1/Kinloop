@@ -53,7 +53,26 @@ export default async function JoinPodPage({
 
   const adminClient = createSupabaseAdminClient();
   if (!adminClient) {
-    return null;
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-16 sm:px-6">
+        <Card className="w-full">
+          <CardHeader>
+            <Badge variant="accent">Invite link</Badge>
+            <CardTitle>This invite page is temporarily unavailable.</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm leading-6 text-slate-600">
+            <p>
+              We can&apos;t load this invite right now because the required
+              configuration is unavailable. Please try again later or return to
+              onboarding.
+            </p>
+            <Link className="text-emerald-700 underline" href="/welcome">
+              Return to onboarding
+            </Link>
+          </CardContent>
+        </Card>
+      </main>
+    );
   }
 
   let inviteState:
