@@ -86,7 +86,6 @@ async function ensureProfile(adminClient: AdminClient, viewer: ViewerSession) {
     },
     {
       onConflict: "user_id",
-      ignoreDuplicates: true,
     },
   );
 
@@ -200,8 +199,17 @@ export async function createPodForViewer(
   });
 
   if (membershipInsertError) {
+    const { error: podCleanupError } = await adminClient.from("pods").delete().eq("id", podRow.id);
+
+    if (podCleanupError) {
+      throw new PodServiceError(
+        "Your pod was created, but we could not add you as the owner or roll back the pod.",
+        500,
+      );
+    }
+
     throw new PodServiceError(
-      "Your pod was created, but we could not add you as the owner.",
+      "Unable to finish creating your family pod right now.",
       500,
     );
   }
