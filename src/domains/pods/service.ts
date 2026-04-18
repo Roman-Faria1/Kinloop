@@ -70,27 +70,25 @@ function deriveDisplayNameFromEmail(email: string) {
     .join(" ");
 }
 
+function isUniqueViolation(error: { code?: string } | null | undefined) {
+  return error?.code === "23505";
+}
+
 async function ensureProfile(adminClient: AdminClient, viewer: ViewerSession) {
   const email = assertEmail(viewer);
 
-  const { data: existingProfile, error: existingProfileError } = await adminClient
-    .from("profiles")
-    .select("id")
-    .eq("user_id", viewer.userId)
-    .maybeSingle();
-
-  if (existingProfileError) {
-    throw new PodServiceError("Unable to load your profile right now.", 500);
-  }
-
-  if (existingProfile) return;
-
-  const { error: profileInsertError } = await adminClient.from("profiles").insert({
-    user_id: viewer.userId,
-    display_name: deriveDisplayNameFromEmail(email),
-    email,
-    relationship_label: "Member",
-  });
+  const { error: profileInsertError } = await adminClient.from("profiles").upsert(
+    {
+      user_id: viewer.userId,
+      display_name: deriveDisplayNameFromEmail(email),
+      email,
+      relationship_label: "Member",
+    },
+    {
+      onConflict: "user_id",
+      ignoreDuplicates: true,
+    },
+  );
 
   if (profileInsertError) {
     throw new PodServiceError("Unable to prepare your profile right now.", 500);
@@ -255,18 +253,24 @@ export async function createInviteForPod(
     }
   }
 
-  const { data: existingInvite, error: existingInviteError } = await adminClient
+  const { data: existingInvites, error: existingInviteError } = await adminClient
     .from("invites")
     .select("id, pod_id, email, role, token, expires_at, revoked_at")
     .eq("pod_id", input.podId)
     .eq("email", normalizedEmail)
     .is("revoked_at", null)
     .gt("expires_at", new Date().toISOString())
-    .maybeSingle<Invite & { pod_id: string; expires_at: string; revoked_at: string | null }>();
+    .order("expires_at", { ascending: false })
+    .limit(1);
 
   if (existingInviteError) {
     throw new PodServiceError("Unable to validate that invite right now.", 500);
   }
+
+  const existingInvite =
+    (existingInvites?.[0] as
+      | (Invite & { pod_id: string; expires_at: string; revoked_at: string | null })
+      | undefined) ?? null;
 
   if (existingInvite) {
     return {
@@ -321,15 +325,21 @@ export async function revokeInviteForPod(
     throw new PodServiceError("You do not have permission to revoke invites.", 403);
   }
 
-  const { error } = await adminClient
+  const { data, error } = await adminClient
     .from("invites")
     .update({ revoked_at: new Date().toISOString() })
     .eq("id", params.inviteId)
     .eq("pod_id", params.podId)
-    .is("revoked_at", null);
+    .is("revoked_at", null)
+    .select("id")
+    .maybeSingle<{ id: string }>();
 
   if (error) {
     throw new PodServiceError("Unable to revoke that invite right now.", 500);
+  }
+
+  if (!data) {
+    throw new PodServiceError("Invite not found or already revoked.", 404);
   }
 }
 
@@ -391,7 +401,7 @@ export async function acceptInviteForViewer(
         role: inviteRow.role,
       });
 
-    if (membershipInsertError) {
+    if (membershipInsertError && !isUniqueViolation(membershipInsertError)) {
       throw new PodServiceError("Unable to accept that invite right now.", 500);
     }
   }
