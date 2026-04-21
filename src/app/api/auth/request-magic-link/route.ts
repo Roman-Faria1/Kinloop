@@ -208,7 +208,11 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  const redirectUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL!);
+  const configuredOrigin = new URL(env.NEXT_PUBLIC_APP_URL!).origin;
+  const requestOrigin = request.nextUrl.origin;
+  const callbackOrigin =
+    requestOrigin === configuredOrigin ? requestOrigin : configuredOrigin;
+  const redirectUrl = new URL("/auth/callback", callbackOrigin);
   redirectUrl.searchParams.set("next", nextPath);
 
   const { error } = await authClient.auth.signInWithOtp({
