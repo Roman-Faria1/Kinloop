@@ -58,9 +58,10 @@ export const isAuthRateLimitConfigured = Boolean(
 );
 
 export const isAuthRequestFlowConfigured = Boolean(
-  isSupabaseConfigured &&
-    isSupabaseAdminConfigured &&
-    isAuthRateLimitConfigured &&
-    parsed.success &&
+  parsed.success &&
+    parsed.data.NEXT_PUBLIC_SUPABASE_URL &&
+    parsed.data.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
+    parsed.data.SUPABASE_SERVICE_ROLE_KEY &&
+    parsed.data.AUTH_RATE_LIMIT_SALT &&
     parsed.data.NEXT_PUBLIC_APP_URL,
 );

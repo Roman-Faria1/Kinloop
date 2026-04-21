@@ -11,12 +11,7 @@ import {
   normalizeEmail,
 } from "@/domains/auth/magic-links";
 import { getSafeRedirectPath } from "@/domains/auth/session";
-import {
-  env,
-  isAuthRateLimitConfigured,
-  isSupabaseAdminConfigured,
-  isSupabaseConfigured,
-} from "@/lib/env";
+import { env, isAuthRequestFlowConfigured } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const requestSchema = z.object({
@@ -55,11 +50,7 @@ function logAuthQueryFailure(message: string, details: Record<string, unknown>) 
 }
 
 export async function POST(request: NextRequest) {
-  if (
-    !isSupabaseConfigured ||
-    !isSupabaseAdminConfigured ||
-    !isAuthRateLimitConfigured
-  ) {
+  if (!isAuthRequestFlowConfigured) {
     return NextResponse.json(
       { error: "Sign-in is temporarily unavailable." },
       { status: 503 },
@@ -217,14 +208,7 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  if (!env.NEXT_PUBLIC_APP_URL) {
-    return NextResponse.json(
-      { error: "Magic link redirect is not configured." },
-      { status: 503 },
-    );
-  }
-
-  const redirectUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL);
+  const redirectUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL!);
   redirectUrl.searchParams.set("next", nextPath);
 
   const { error } = await authClient.auth.signInWithOtp({
