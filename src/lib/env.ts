@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
@@ -17,7 +17,7 @@ const envSchema = z.object({
 const parsed = envSchema.safeParse(process.env);
 
 const fallback: z.infer<typeof envSchema> = {
-  NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  NEXT_PUBLIC_APP_URL: undefined,
   NEXT_PUBLIC_SUPABASE_URL: undefined,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: undefined,
   SUPABASE_SERVICE_ROLE_KEY: undefined,
@@ -60,5 +60,7 @@ export const isAuthRateLimitConfigured = Boolean(
 export const isAuthRequestFlowConfigured = Boolean(
   isSupabaseConfigured &&
     isSupabaseAdminConfigured &&
-    isAuthRateLimitConfigured,
+    isAuthRateLimitConfigured &&
+    parsed.success &&
+    parsed.data.NEXT_PUBLIC_APP_URL,
 );

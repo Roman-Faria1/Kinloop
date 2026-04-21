@@ -217,7 +217,14 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  const redirectUrl = new URL("/auth/callback", request.nextUrl.origin);
+  if (!env.NEXT_PUBLIC_APP_URL) {
+    return NextResponse.json(
+      { error: "Magic link redirect is not configured." },
+      { status: 503 },
+    );
+  }
+
+  const redirectUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL);
   redirectUrl.searchParams.set("next", nextPath);
 
   const { error } = await authClient.auth.signInWithOtp({
