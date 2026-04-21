@@ -57,6 +57,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const appUrl = env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) {
+    return NextResponse.json(
+      { error: "Sign-in is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
+
   const body = await request.json().catch(() => null);
   const parsedBody = requestSchema.safeParse(body);
 
@@ -208,7 +216,7 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  const configuredOrigin = new URL(env.NEXT_PUBLIC_APP_URL!).origin;
+  const configuredOrigin = new URL(appUrl).origin;
   const requestOrigin = request.nextUrl.origin;
   const callbackOrigin =
     requestOrigin === configuredOrigin ? requestOrigin : configuredOrigin;
