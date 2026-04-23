@@ -171,6 +171,31 @@ export async function listPendingInvitesForViewer(
   }));
 }
 
+export async function getPendingInviteTokenForViewer(
+  adminClient: AdminClient,
+  viewer: ViewerSession,
+  podId: string,
+) {
+  const email = assertEmail(viewer);
+
+  const { data, error } = await adminClient
+    .from("invites")
+    .select("token")
+    .eq("pod_id", podId)
+    .eq("email", email)
+    .is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .order("expires_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw new PodServiceError("Unable to load that invite right now.", 500);
+  }
+
+  const token = data?.[0]?.token;
+  return typeof token === "string" ? token : undefined;
+}
+
 export async function createPodForViewer(
   adminClient: AdminClient,
   viewer: ViewerSession,
