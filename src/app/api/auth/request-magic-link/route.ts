@@ -11,12 +11,7 @@ import {
   normalizeEmail,
 } from "@/domains/auth/magic-links";
 import { getSafeRedirectPath } from "@/domains/auth/session";
-import {
-  env,
-  isAuthRateLimitConfigured,
-  isSupabaseAdminConfigured,
-  isSupabaseConfigured,
-} from "@/lib/env";
+import { env, isAuthRequestFlowConfigured } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const requestSchema = z.object({
@@ -55,11 +50,15 @@ function logAuthQueryFailure(message: string, details: Record<string, unknown>) 
 }
 
 export async function POST(request: NextRequest) {
-  if (
-    !isSupabaseConfigured ||
-    !isSupabaseAdminConfigured ||
-    !isAuthRateLimitConfigured
-  ) {
+  if (!isAuthRequestFlowConfigured) {
+    return NextResponse.json(
+      { error: "Sign-in is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
+
+  const appUrl = env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) {
     return NextResponse.json(
       { error: "Sign-in is temporarily unavailable." },
       { status: 503 },
@@ -217,7 +216,11 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  const redirectUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL);
+  const configuredOrigin = new URL(appUrl).origin;
+  const requestOrigin = request.nextUrl.origin;
+  const callbackOrigin =
+    requestOrigin === configuredOrigin ? requestOrigin : configuredOrigin;
+  const redirectUrl = new URL("/auth/callback", callbackOrigin);
   redirectUrl.searchParams.set("next", nextPath);
 
   const { error } = await authClient.auth.signInWithOtp({

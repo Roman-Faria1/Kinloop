@@ -62,6 +62,8 @@ For Supabase auth to work locally:
 
 - add `http://127.0.0.1:3000/auth/callback` to the project's redirect URLs
 - add `http://localhost:3000/auth/callback` too if you use that host in development
+- add `https://app.kinloop.dev/auth/callback` for production
+- set `NEXT_PUBLIC_APP_URL` to the canonical app origin for each environment, such as `http://localhost:3000` locally and `https://app.kinloop.dev` in production
 - Supabase's built-in mailer is heavily rate limited for development, so configure custom SMTP before relying on repeated magic-link tests
 - use the sign-in page to request a magic link once env vars are configured and SMTP is ready
 

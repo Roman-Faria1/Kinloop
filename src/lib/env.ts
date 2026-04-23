@@ -1,7 +1,29 @@
 import { z } from "zod";
 
+const appOriginSchema = z
+  .string()
+  .url()
+  .superRefine((value, context) => {
+    const url = new URL(value);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      context.addIssue({
+        code: "custom",
+        message: "App URL must use http or https.",
+      });
+    }
+
+    if (url.pathname !== "/" || url.search || url.hash) {
+      context.addIssue({
+        code: "custom",
+        message: "App URL must be an origin without a path, query, or hash.",
+      });
+    }
+  })
+  .transform((value) => new URL(value).origin);
+
 const envSchema = z.object({
-  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_APP_URL: appOriginSchema.optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
@@ -17,7 +39,7 @@ const envSchema = z.object({
 const parsed = envSchema.safeParse(process.env);
 
 const fallback: z.infer<typeof envSchema> = {
-  NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  NEXT_PUBLIC_APP_URL: undefined,
   NEXT_PUBLIC_SUPABASE_URL: undefined,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: undefined,
   SUPABASE_SERVICE_ROLE_KEY: undefined,
@@ -58,7 +80,10 @@ export const isAuthRateLimitConfigured = Boolean(
 );
 
 export const isAuthRequestFlowConfigured = Boolean(
-  isSupabaseConfigured &&
-    isSupabaseAdminConfigured &&
-    isAuthRateLimitConfigured,
+  parsed.success &&
+    parsed.data.NEXT_PUBLIC_SUPABASE_URL &&
+    parsed.data.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
+    parsed.data.SUPABASE_SERVICE_ROLE_KEY &&
+    parsed.data.AUTH_RATE_LIMIT_SALT &&
+    parsed.data.NEXT_PUBLIC_APP_URL,
 );
