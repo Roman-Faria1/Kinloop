@@ -114,6 +114,7 @@ afterEach(() => {
 
 describe("event mutations", () => {
   it("creates an event and schedules reminder deliveries", async () => {
+    vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
 
     const reminderUpserts: Array<{ payload: unknown; options: unknown }> = [];
@@ -282,6 +283,7 @@ describe("event mutations", () => {
   });
 
   it("updates an event and reschedules reminder deliveries", async () => {
+    vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
 
     const eventUpdates: unknown[] = [];
@@ -380,6 +382,66 @@ describe("event mutations", () => {
         },
       },
     ]);
+  });
+
+  it("rejects updates to cancelled events without rescheduling reminders", async () => {
+    const deliveryUpserts: Array<{ payload: unknown; options: unknown }> = [];
+
+    const adminClient = createAdminClient({
+      selectHandlers: {
+        notification_deliveries: () => ({
+          data: [],
+          error: null,
+        }),
+      },
+      maybeSingleHandlers: {
+        pod_memberships: () => ({
+          data: {
+            id: "membership-owner",
+            pod_id: "pod-1",
+            user_id: "user-1",
+            role: "owner",
+          },
+          error: null,
+        }),
+        events: () => ({
+          data: {
+            id: "event-cancelled",
+            pod_id: "pod-1",
+            creator_membership_id: "membership-owner",
+            starts_at: "2026-04-24T20:00:00.000Z",
+            ends_at: "2026-04-24T21:00:00.000Z",
+            event_kind: "standard",
+            is_cancelled: true,
+          },
+          error: null,
+        }),
+      },
+      upsertHandlers: {
+        notification_deliveries: (payload, options) => {
+          deliveryUpserts.push({ payload, options });
+          return { error: null };
+        },
+      },
+    });
+
+    await expect(
+      updateEventForPod(adminClient as never, viewer, {
+        eventId: "event-cancelled",
+        podId: "pod-1",
+        title: "Should not update",
+        notes: "",
+        location: "",
+        startsAt: "2026-04-24T22:00:00.000Z",
+        eventKind: "standard",
+        reminderOffsetMinutes: 30,
+      }),
+    ).rejects.toMatchObject({
+      message: "Cancelled events cannot be edited.",
+      status: 409,
+    });
+
+    expect(deliveryUpserts).toEqual([]);
   });
 
   it("rolls back the created event if reminder persistence fails", async () => {

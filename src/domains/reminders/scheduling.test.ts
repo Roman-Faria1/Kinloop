@@ -81,6 +81,7 @@ afterEach(() => {
 
 describe("reminder scheduling", () => {
   it("creates future deliveries and cancels obsolete pending deliveries", async () => {
+    vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
 
     const updates: QueryState[] = [];
@@ -164,6 +165,7 @@ describe("reminder scheduling", () => {
   });
 
   it("does not create deliveries for reminders already in the past", async () => {
+    vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
 
     const updates: QueryState[] = [];
@@ -197,6 +199,82 @@ describe("reminder scheduling", () => {
     expect(result).toEqual({ scheduledCount: 0 });
     expect(updates).toHaveLength(1);
     expect(updates[0].payload).toEqual({ status: "cancelled" });
+  });
+
+  it("restores cancelled deliveries when an event moves back to the same reminder slot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
+
+    const updates: QueryState[] = [];
+    const deliveryUpserts: Array<{ payload: unknown; options: unknown }> = [];
+    const desiredDedupeKey = "event-1:membership-1:push:2026-04-24T20:00:00.000Z";
+
+    const adminClient = createAdminClient({
+      selectHandlers: {
+        pod_memberships: () => ({
+          data: [{ id: "membership-1" }],
+          error: null,
+        }),
+        notification_channels: () => ({
+          data: [{ membership_id: "membership-1", channel: "push" }],
+          error: null,
+        }),
+        notification_deliveries: (state) => {
+          const dedupeFilter = state.filters.find(
+            (filter) => filter.field === "dedupe_key",
+          );
+
+          if (dedupeFilter) {
+            return {
+              data: [
+                {
+                  id: "delivery-cancelled",
+                  dedupe_key: desiredDedupeKey,
+                  status: "cancelled",
+                },
+              ],
+              error: null,
+            };
+          }
+
+          return { data: [], error: null };
+        },
+      },
+      commandHandlers: {
+        "notification_deliveries:update": (state) => {
+          updates.push(state);
+          return { data: null, error: null };
+        },
+      },
+      upsertHandlers: {
+        notification_deliveries: (payload, options) => {
+          deliveryUpserts.push({ payload, options });
+          return { error: null };
+        },
+      },
+    });
+
+    const result = await syncEventReminderDeliveries(adminClient as never, {
+      podId: "pod-1",
+      eventId: "event-1",
+      startsAt: "2026-04-24T21:00:00.000Z",
+      reminderOffsetMinutes: 60,
+    });
+
+    expect(result).toEqual({ scheduledCount: 1 });
+    expect(deliveryUpserts).toEqual([]);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload).toEqual({ status: "pending", sent_at: null });
+    expect(updates[0].filters).toContainEqual({
+      field: "dedupe_key",
+      value: [desiredDedupeKey],
+      operator: "in",
+    });
+    expect(updates[0].filters).toContainEqual({
+      field: "status",
+      value: "cancelled",
+      operator: "eq",
+    });
   });
 
   it("cancels all pending deliveries for an event", async () => {

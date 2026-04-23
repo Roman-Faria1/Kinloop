@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeReminderTimestamp, createDeliveryDedupeKey } from "@/domains/reminders/service";
-import type { NotificationChannelKind, ReminderOffsetMinutes } from "@/lib/types";
+import type {
+  DeliveryStatus,
+  NotificationChannelKind,
+  ReminderOffsetMinutes,
+} from "@/lib/types";
 
 type AdminClient = SupabaseClient;
 
@@ -12,6 +16,10 @@ interface ChannelRow {
 interface PendingDeliveryRow {
   id: string;
   dedupe_key: string;
+}
+
+interface DeliveryStatusRow extends PendingDeliveryRow {
+  status: DeliveryStatus;
 }
 
 export class ReminderSchedulingError extends Error {
@@ -72,6 +80,31 @@ async function listPendingDeliveriesForEvent(adminClient: AdminClient, eventId: 
   );
 }
 
+async function listDeliveriesByDedupeKeys(
+  adminClient: AdminClient,
+  dedupeKeys: string[],
+) {
+  if (dedupeKeys.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await adminClient
+    .from("notification_deliveries")
+    .select("id, dedupe_key, status")
+    .in("dedupe_key", dedupeKeys);
+
+  if (error) {
+    throw new ReminderSchedulingError("Unable to load existing reminder deliveries.");
+  }
+
+  return ((data ?? []) as DeliveryStatusRow[]).filter(
+    (delivery) =>
+      typeof delivery.id === "string" &&
+      typeof delivery.dedupe_key === "string" &&
+      typeof delivery.status === "string",
+  );
+}
+
 async function cancelPendingDeliveriesById(
   adminClient: AdminClient,
   deliveryIds: string[],
@@ -88,6 +121,25 @@ async function cancelPendingDeliveriesById(
 
   if (error) {
     throw new ReminderSchedulingError("Unable to cancel pending reminder deliveries.");
+  }
+}
+
+async function restoreCancelledDeliveriesByDedupeKey(
+  adminClient: AdminClient,
+  dedupeKeys: string[],
+) {
+  if (dedupeKeys.length === 0) {
+    return;
+  }
+
+  const { error } = await adminClient
+    .from("notification_deliveries")
+    .update({ status: "pending", sent_at: null })
+    .in("dedupe_key", dedupeKeys)
+    .eq("status", "cancelled");
+
+  if (error) {
+    throw new ReminderSchedulingError("Unable to restore reminder deliveries.");
   }
 }
 
@@ -149,15 +201,37 @@ export async function syncEventReminderDeliveries(
     return { scheduledCount: 0 };
   }
 
-  const { error: upsertError } = await adminClient
-    .from("notification_deliveries")
-    .upsert(desiredDeliveries, {
-      onConflict: "dedupe_key",
-      ignoreDuplicates: true,
-    });
+  const existingDesiredDeliveries = await listDeliveriesByDedupeKeys(
+    adminClient,
+    [...desiredDedupeKeys],
+  );
+  const existingDesiredDedupeKeys = new Set(
+    existingDesiredDeliveries.map((delivery) => delivery.dedupe_key),
+  );
+  const cancelledDesiredDedupeKeys = existingDesiredDeliveries
+    .filter((delivery) => delivery.status === "cancelled")
+    .map((delivery) => delivery.dedupe_key);
 
-  if (upsertError) {
-    throw new ReminderSchedulingError("Unable to schedule reminder deliveries.");
+  await restoreCancelledDeliveriesByDedupeKey(
+    adminClient,
+    cancelledDesiredDedupeKeys,
+  );
+
+  const newDeliveries = desiredDeliveries.filter(
+    (delivery) => !existingDesiredDedupeKeys.has(delivery.dedupe_key),
+  );
+
+  if (newDeliveries.length > 0) {
+    const { error: upsertError } = await adminClient
+      .from("notification_deliveries")
+      .upsert(newDeliveries, {
+        onConflict: "dedupe_key",
+        ignoreDuplicates: true,
+      });
+
+    if (upsertError) {
+      throw new ReminderSchedulingError("Unable to schedule reminder deliveries.");
+    }
   }
 
   return { scheduledCount: desiredDeliveries.length };

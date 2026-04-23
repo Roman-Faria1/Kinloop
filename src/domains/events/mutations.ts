@@ -237,6 +237,16 @@ export async function updateEventForPod(
     throw new EventMutationError("You do not have permission to edit that event.", 403);
   }
 
+  if (currentEvent.is_cancelled) {
+    try {
+      await cancelPendingEventReminderDeliveries(adminClient, input.eventId);
+    } catch (error) {
+      throw toEventMutationError(error);
+    }
+
+    throw new EventMutationError("Cancelled events cannot be edited.", 409);
+  }
+
   const startsAt = parseIsoDateTime(input.startsAt, "start time");
   const currentDurationMs =
     new Date(currentEvent.ends_at).getTime() - new Date(currentEvent.starts_at).getTime();
