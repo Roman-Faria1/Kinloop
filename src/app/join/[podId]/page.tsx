@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getViewerSession } from "@/domains/auth/session";
 import {
   getJoinInviteForViewer,
+  listPendingInvitesForViewer,
   PodServiceError,
 } from "@/domains/pods/service";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -25,23 +26,28 @@ export default async function JoinPodPage({
   const viewer = await getViewerSession();
   const { podId } = await params;
   const resolvedSearchParams = await searchParams;
-  const token = resolvedSearchParams.token;
+  let token = resolvedSearchParams.token;
 
   if (!viewer) {
-    const next = encodeURIComponent(`/join/${podId}?token=${token ?? ""}`);
+    const nextPath = token ? `/join/${podId}?token=${token}` : `/join/${podId}`;
+    const next = encodeURIComponent(nextPath);
     redirect(`/sign-in?next=${next}`);
   }
 
-  if (!token || !isSupabaseAdminConfigured) {
+  if (!isSupabaseAdminConfigured) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-16 sm:px-6">
         <Card className="w-full">
           <CardHeader>
             <Badge variant="accent">Invite link</Badge>
-            <CardTitle>This invite link is incomplete.</CardTitle>
+            <CardTitle>This invite page is temporarily unavailable.</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm leading-6 text-slate-600">
-            <p>Try opening the full invite link again or ask for a fresh invite.</p>
+            <p>
+              We can&apos;t load this invite right now because the required
+              configuration is unavailable. Please try again later or return to
+              onboarding.
+            </p>
             <Link className="text-emerald-700 underline" href="/welcome">
               Return to onboarding
             </Link>
@@ -81,6 +87,18 @@ export default async function JoinPodPage({
   let loadErrorMessage: string | null = null;
 
   try {
+    if (!token) {
+      const matchingInvite = (await listPendingInvitesForViewer(adminClient, viewer)).find(
+        (invite) => invite.podId === podId,
+      );
+
+      token = matchingInvite?.token;
+    }
+
+    if (!token) {
+      throw new PodServiceError("Try opening the full invite link again or ask for a fresh invite.");
+    }
+
     inviteState = await getJoinInviteForViewer(adminClient, viewer, {
       podId,
       token,
