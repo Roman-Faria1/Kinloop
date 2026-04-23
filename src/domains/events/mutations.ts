@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreateEvents, canEditEvent } from "@/domains/auth/roles";
 import type { ViewerSession } from "@/domains/auth/session";
+import {
+  cancelPendingEventReminderDeliveries,
+  ReminderSchedulingError,
+  syncEventReminderDeliveries,
+} from "@/domains/reminders/scheduling";
 import type { EventKind, PodRole, ReminderOffsetMinutes } from "@/lib/types";
 
 type AdminClient = SupabaseClient;
@@ -69,6 +74,18 @@ function parseIsoDateTime(value: string, fieldLabel: string) {
 
 function computeEndsAt(startsAt: Date, durationMs = 60 * 60 * 1000) {
   return new Date(startsAt.getTime() + durationMs).toISOString();
+}
+
+function toEventMutationError(error: unknown) {
+  if (error instanceof EventMutationError) {
+    return error;
+  }
+
+  if (error instanceof ReminderSchedulingError) {
+    return new EventMutationError(error.message, 500);
+  }
+
+  return new EventMutationError("Unable to update reminder scheduling right now.", 500);
 }
 
 async function getActorMembership(
@@ -191,9 +208,15 @@ export async function createEventForPod(
 
   try {
     await replaceReminderRule(adminClient, eventRow.id, input.reminderOffsetMinutes);
+    await syncEventReminderDeliveries(adminClient, {
+      podId: input.podId,
+      eventId: eventRow.id,
+      startsAt: startsAt.toISOString(),
+      reminderOffsetMinutes: input.reminderOffsetMinutes,
+    });
   } catch (error) {
     await adminClient.from("events").delete().eq("id", eventRow.id);
-    throw error;
+    throw toEventMutationError(error);
   }
 
   return eventRow.id;
@@ -236,7 +259,17 @@ export async function updateEventForPod(
     throw new EventMutationError("Unable to update that event right now.", 500);
   }
 
-  await replaceReminderRule(adminClient, input.eventId, input.reminderOffsetMinutes);
+  try {
+    await replaceReminderRule(adminClient, input.eventId, input.reminderOffsetMinutes);
+    await syncEventReminderDeliveries(adminClient, {
+      podId: input.podId,
+      eventId: input.eventId,
+      startsAt: startsAt.toISOString(),
+      reminderOffsetMinutes: input.reminderOffsetMinutes,
+    });
+  } catch (error) {
+    throw toEventMutationError(error);
+  }
 
   return input.eventId;
 }
@@ -257,6 +290,12 @@ export async function cancelEventForPod(
   }
 
   if (currentEvent.is_cancelled) {
+    try {
+      await cancelPendingEventReminderDeliveries(adminClient, input.eventId);
+    } catch (error) {
+      throw toEventMutationError(error);
+    }
+
     return input.eventId;
   }
 
@@ -268,6 +307,12 @@ export async function cancelEventForPod(
 
   if (error) {
     throw new EventMutationError("Unable to cancel that event right now.", 500);
+  }
+
+  try {
+    await cancelPendingEventReminderDeliveries(adminClient, input.eventId);
+  } catch (schedulingError) {
+    throw toEventMutationError(schedulingError);
   }
 
   return input.eventId;

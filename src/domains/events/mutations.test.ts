@@ -3,6 +3,7 @@ import {
   createEventForPod,
   updateEventForPod,
 } from "@/domains/events/mutations";
+import { afterEach, vi } from "vitest";
 
 type ScenarioResult = { data?: unknown; error?: { code?: string; message?: string } | null };
 type ScenarioHandler = (state: QueryState) => ScenarioResult | Promise<ScenarioResult>;
@@ -15,7 +16,7 @@ interface QueryState {
   action: "select" | "insert" | "update" | "delete";
   table: string;
   payload?: unknown;
-  filters: Array<{ field: string; value: unknown }>;
+  filters: Array<{ field: string; value: unknown; operator?: "eq" | "in" }>;
 }
 
 function createAdminClient({
@@ -59,7 +60,11 @@ function createAdminClient({
           return builder;
         },
         eq(field: string, value: unknown) {
-          state.filters.push({ field, value });
+          state.filters.push({ field, value, operator: "eq" });
+          return builder;
+        },
+        in(field: string, value: unknown[]) {
+          state.filters.push({ field, value, operator: "in" });
           return builder;
         },
         maybeSingle<T>() {
@@ -103,11 +108,28 @@ const viewer = {
   email: "owner@example.com",
 };
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("event mutations", () => {
-  it("creates an event and upserts a single reminder rule", async () => {
+  it("creates an event and schedules reminder deliveries", async () => {
+    vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
+
     const reminderUpserts: Array<{ payload: unknown; options: unknown }> = [];
+    const deliveryUpserts: Array<{ payload: unknown; options: unknown }> = [];
 
     const adminClient = createAdminClient({
+      selectHandlers: {
+        pod_memberships: () => ({
+          data: [{ id: "membership-owner" }],
+          error: null,
+        }),
+        notification_channels: () => ({
+          data: [{ membership_id: "membership-owner", channel: "push" }],
+          error: null,
+        }),
+      },
       maybeSingleHandlers: {
         pod_memberships: () => ({
           data: {
@@ -134,6 +156,10 @@ describe("event mutations", () => {
           reminderUpserts.push({ payload, options });
           return { error: null };
         },
+        notification_deliveries: (payload, options) => {
+          deliveryUpserts.push({ payload, options });
+          return { error: null };
+        },
       },
     });
 
@@ -156,6 +182,25 @@ describe("event mutations", () => {
         },
         options: {
           onConflict: "event_id",
+        },
+      },
+    ]);
+    expect(deliveryUpserts).toEqual([
+      {
+        payload: [
+          {
+            membership_id: "membership-owner",
+            event_id: "event-1",
+            channel: "push",
+            scheduled_for: "2026-04-24T20:45:00.000Z",
+            status: "pending",
+            sent_at: null,
+            dedupe_key: "event-1:membership-owner:push:2026-04-24T20:45:00.000Z",
+          },
+        ],
+        options: {
+          onConflict: "dedupe_key",
+          ignoreDuplicates: true,
         },
       },
     ]);
@@ -234,6 +279,107 @@ describe("event mutations", () => {
       message: "You do not have permission to edit that event.",
       status: 403,
     });
+  });
+
+  it("updates an event and reschedules reminder deliveries", async () => {
+    vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
+
+    const eventUpdates: unknown[] = [];
+    const deliveryUpdates: QueryState[] = [];
+    const deliveryUpserts: Array<{ payload: unknown; options: unknown }> = [];
+
+    const adminClient = createAdminClient({
+      selectHandlers: {
+        pod_memberships: () => ({
+          data: [{ id: "membership-owner" }],
+          error: null,
+        }),
+        notification_channels: () => ({
+          data: [{ membership_id: "membership-owner", channel: "email" }],
+          error: null,
+        }),
+        notification_deliveries: () => ({
+          data: [{ id: "delivery-old", dedupe_key: "old-key" }],
+          error: null,
+        }),
+      },
+      maybeSingleHandlers: {
+        pod_memberships: () => ({
+          data: {
+            id: "membership-owner",
+            pod_id: "pod-1",
+            user_id: "user-1",
+            role: "owner",
+          },
+          error: null,
+        }),
+        events: () => ({
+          data: {
+            id: "event-1",
+            pod_id: "pod-1",
+            creator_membership_id: "membership-owner",
+            starts_at: "2026-04-24T20:00:00.000Z",
+            ends_at: "2026-04-24T21:00:00.000Z",
+            event_kind: "standard",
+            is_cancelled: false,
+          },
+          error: null,
+        }),
+      },
+      commandHandlers: {
+        "events:update": (state) => {
+          eventUpdates.push(state.payload);
+          return { data: null, error: null };
+        },
+        "notification_deliveries:update": (state) => {
+          deliveryUpdates.push(state);
+          return { data: null, error: null };
+        },
+      },
+      upsertHandlers: {
+        event_reminders: () => ({ error: null }),
+        notification_deliveries: (payload, options) => {
+          deliveryUpserts.push({ payload, options });
+          return { error: null };
+        },
+      },
+    });
+
+    await expect(
+      updateEventForPod(adminClient as never, viewer, {
+        eventId: "event-1",
+        podId: "pod-1",
+        title: "Updated carpool",
+        notes: "New pickup time",
+        location: "School",
+        startsAt: "2026-04-24T22:00:00.000Z",
+        eventKind: "standard",
+        reminderOffsetMinutes: 30,
+      }),
+    ).resolves.toBe("event-1");
+
+    expect(eventUpdates).toHaveLength(1);
+    expect(deliveryUpdates).toHaveLength(1);
+    expect(deliveryUpdates[0].payload).toEqual({ status: "cancelled" });
+    expect(deliveryUpserts).toEqual([
+      {
+        payload: [
+          {
+            membership_id: "membership-owner",
+            event_id: "event-1",
+            channel: "email",
+            scheduled_for: "2026-04-24T21:30:00.000Z",
+            status: "pending",
+            sent_at: null,
+            dedupe_key: "event-1:membership-owner:email:2026-04-24T21:30:00.000Z",
+          },
+        ],
+        options: {
+          onConflict: "dedupe_key",
+          ignoreDuplicates: true,
+        },
+      },
+    ]);
   });
 
   it("rolls back the created event if reminder persistence fails", async () => {
@@ -331,6 +477,72 @@ describe("event mutations", () => {
     ).rejects.toMatchObject({
       message: "You do not have permission to cancel that event.",
       status: 403,
+    });
+  });
+
+  it("cancels an event and suppresses pending reminder deliveries", async () => {
+    const eventUpdates: unknown[] = [];
+    const deliveryUpdates: QueryState[] = [];
+
+    const adminClient = createAdminClient({
+      selectHandlers: {
+        notification_deliveries: () => ({
+          data: [
+            { id: "delivery-1", dedupe_key: "key-1" },
+            { id: "delivery-2", dedupe_key: "key-2" },
+          ],
+          error: null,
+        }),
+      },
+      maybeSingleHandlers: {
+        pod_memberships: () => ({
+          data: {
+            id: "membership-owner",
+            pod_id: "pod-1",
+            user_id: "user-1",
+            role: "owner",
+          },
+          error: null,
+        }),
+        events: () => ({
+          data: {
+            id: "event-1",
+            pod_id: "pod-1",
+            creator_membership_id: "membership-owner",
+            starts_at: "2026-04-24T20:00:00.000Z",
+            ends_at: "2026-04-24T21:00:00.000Z",
+            event_kind: "standard",
+            is_cancelled: false,
+          },
+          error: null,
+        }),
+      },
+      commandHandlers: {
+        "events:update": (state) => {
+          eventUpdates.push(state.payload);
+          return { data: null, error: null };
+        },
+        "notification_deliveries:update": (state) => {
+          deliveryUpdates.push(state);
+          return { data: null, error: null };
+        },
+      },
+    });
+
+    await expect(
+      cancelEventForPod(adminClient as never, viewer, {
+        podId: "pod-1",
+        eventId: "event-1",
+      }),
+    ).resolves.toBe("event-1");
+
+    expect(eventUpdates).toEqual([{ is_cancelled: true }]);
+    expect(deliveryUpdates).toHaveLength(1);
+    expect(deliveryUpdates[0].payload).toEqual({ status: "cancelled" });
+    expect(deliveryUpdates[0].filters).toContainEqual({
+      field: "id",
+      value: ["delivery-1", "delivery-2"],
+      operator: "in",
     });
   });
 });
