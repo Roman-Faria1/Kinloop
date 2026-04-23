@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   pgEnum,
   pgTable,
   text,
@@ -23,6 +24,7 @@ export const deliveryStatusEnum = pgEnum("delivery_status", [
   "sent",
   "failed",
   "acknowledged",
+  "cancelled",
 ]);
 
 export const pods = pgTable("pods", {
@@ -132,6 +134,10 @@ export const notificationDeliveries = pgTable(
     dedupeKey: text("dedupe_key").notNull(),
   },
   (table) => ({
+    eventStatusIdx: index("notification_deliveries_event_status_idx").on(
+      table.eventId,
+      table.status,
+    ),
     uniqueDedupeKey: uniqueIndex("notification_deliveries_dedupe_key_idx").on(
       table.dedupeKey,
     ),
