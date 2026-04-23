@@ -185,7 +185,7 @@ export async function getPendingInviteTokenForViewer(
     .eq("email", email)
     .is("revoked_at", null)
     .gt("expires_at", new Date().toISOString())
-    .order("expires_at", { ascending: true })
+    .order("expires_at", { ascending: false })
     .limit(1);
 
   if (error) {
