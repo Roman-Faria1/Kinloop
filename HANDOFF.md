@@ -42,13 +42,17 @@ Verified locally on 2026-10-20:
 
 | Item | State |
 | --- | --- |
-| Branch for this checkpoint update | `docs/update-reminder-handoff`, created from merged `origin/main`; recheck Git for current branch and working-tree state |
-| Verified remote `main` | `89a216b` - merge of PR #13; local `main` can still lag until fast-forwarded |
+| Current fix branch | `fix/ssr-session-refresh`, created from `origin/main`; owner authorized commit, push, and PR creation after local validation; recheck GitHub for publication/merge state |
+| Verified remote `main` | `745ea87` - merge of documentation PR #14; local `main` can still lag until fast-forwarded |
 | Transaction fix | `f9c152b` - `fix: make event and reminder updates atomic`, included in the merge |
 | Completed PR | [#13: schedule reminder deliveries from event writes](https://github.com/Roman-Faria1/Kinloop/pull/13), confirmed merged on 2026-10-20; remote feature branch deletion confirmed by fetch/prune |
 | Checks/review | All review threads resolved; GitHub CI and Vercel preview passed for `f9c152b` before merge |
 | SQL migration `0005` | Owner reported applying it in Supabase SQL Editor; not independently checked against the database |
 | SQL migration `0006` | Owner reported running it in Supabase and confirming the function exists via SQL Editor; runtime integration not independently checked |
+
+Production incident confirmed by owner-provided Vercel logs on 2026-10-20: GET `/` returned `500` with `Cookies can only be modified in a Server Action or Route Handler.` Supabase's server client attempted cookie writes during Server Component rendering. The root-level `middleware.ts` was not registered alongside `src/app`, so the intended session-refresh and security-header layer was missing from the build.
+
+The fix moves that layer to Next.js 16's `src/proxy.ts`, forwards refreshed cookies to rendering and the browser, and preserves Supabase cache headers and app security headers. The server client tolerates only the known read-only cookie exception; other cookie-write failures still propagate. The production build now reports `Proxy (Middleware)`. Regression tests cover refresh/clear behavior, writable and read-only cookie stores, unexpected errors, and proxy headers in the browser smoke test. No database migration is needed. Production remains unverified until this branch is reviewed, merged, and deployed.
 
 PR #13's original six comments were addressed in `0a4072e` and are resolved on GitHub. Four concerned fake timers; the other two concerned restoring cancelled deliveries and rejecting edits to cancelled events.
 
@@ -58,7 +62,7 @@ The fix uses `public.mutate_pod_event_with_reminders` from migration `0006_atomi
 
 The RPC is `SECURITY INVOKER`, callable by `service_role` only, with an explicit empty search path. Server code supplies the user ID from the verified viewer session. Event creation still uses the prior TypeScript scheduler and compensating delete on failure; do not claim every lifecycle write is now transactional.
 
-Next gate: confirm Vercel production deployed the merge, then smoke-test creating, editing, and cancelling an event. The owner reported applying migration `0006`; hosted runtime integration has not been independently checked. Database changes were not run by the agent. Triage the dependency audit findings before adding the next feature.
+Next gate: publish and deploy the session-refresh fix, then confirm the homepage works with an existing session and after sign-in. Follow with creating, editing, and cancelling an event. The owner reported applying migration `0006`; hosted runtime integration has not been independently checked. Database changes were not run by the agent. Triage the dependency audit findings before adding the next feature.
 
 ## Implemented Versus Planned
 
@@ -88,7 +92,7 @@ Paths below are relative to the repository root so they work on other devices.
 | `src/app/auth/callback/route.ts` | Code exchange, token-hash verification, or browser bridge for URL fragments |
 | `src/app/api/auth/complete-implicit/route.ts` | Origin/state-cookie check, session creation, home destination |
 | `src/domains/auth/session.ts`, `src/domains/auth/roles.ts` | Viewer identity, redirect-path helper, shared role rules |
-| `middleware.ts` | Supabase cookie refresh and security/indexing headers |
+| `src/proxy.ts` | Supabase cookie refresh, cache headers, and security/indexing headers; must sit alongside `src/app` to be registered |
 | `src/app/welcome/page.tsx`, `src/components/welcome/welcome-onboarding.tsx` | Pod creation and pending-invite acceptance |
 | `src/app/join/[podId]/page.tsx` | Token link validation or signed-in email/pod token recovery |
 | `src/domains/pods/service.ts` | Pod/invite writes, membership checks, profile preparation |
@@ -183,11 +187,11 @@ npm run test:e2e
 
 Typecheck intentionally runs `next typegen` and uses `tsconfig.typecheck.json`; preserve that solution to previously stale generated route types. Vitest uses Node, `src/**/*.test.ts`, global test functions, and V8 coverage. Time-dependent scheduling tests now enable fake timers and restore real timers afterward.
 
-Playwright currently has one Chromium landing/navigation smoke test. Its branch depends on demo versus configured-auth mode; it does not exercise real email login, invites, or reminder delivery. Browser/system dependencies may need installation on a fresh device. Use `npx playwright install chromium` if the browser binary is missing; Linux dependency setup is machine-specific.
+Playwright currently has one Chromium landing/navigation smoke test that also asserts proxy security headers. Its branch depends on demo versus configured-auth mode; it does not exercise real email login, invites, or reminder delivery. Browser/system dependencies may need installation on a fresh device. Use `npx playwright install chromium` if the browser binary is missing; Linux dependency setup is machine-specific.
 
 CI in `.github/workflows/ci.yml` currently runs `npm ci`, lint, typecheck, and unit tests on PRs/main pushes. Build and E2E are not CI steps there; verify them separately when warranted.
 
-Local validation on 2026-10-20 for the transaction fixes: lint, typecheck, 61 tests across 9 files, and production build passed. The suite now includes PGlite as a dev dependency to execute PostgreSQL migrations and verify transaction rollback, role restrictions, scheduling idempotency, and permission/error behavior without accessing Supabase. PGlite does not test hosted PostgREST/session behavior or simultaneous connections. E2E was not rerun for these server/database changes.
+Local validation on 2026-10-20 for the session-refresh fix: lint, typecheck, 68 tests across 11 files, production build, and the Chromium E2E smoke test passed. The build explicitly registered `Proxy (Middleware)`. Unit tests mock Supabase session refresh; real expired-session behavior still needs verification after deployment. The suite includes PGlite as a dev dependency to execute PostgreSQL migrations and verify transaction rollback, role restrictions, scheduling idempotency, and permission/error behavior without accessing Supabase. PGlite does not test hosted PostgREST/session behavior or simultaneous connections.
 
 The dependency install also reported npm audit findings (66 total, including one critical). These were not triaged in this pass, and no unrelated dependency upgrades or automatic audit fixes were applied. Assess them separately before a public launch; passing tests do not resolve dependency advisories.
 
@@ -210,7 +214,7 @@ Live open issues checked on 2026-10-20:
 
 | Issue | Scope / current note |
 | --- | --- |
-| [#4](https://github.com/Roman-Faria1/Kinloop/issues/4) | Environment-driven indexing before public launch. `robots.ts` and middleware currently disable indexing unconditionally; noindex is not access control |
+| [#4](https://github.com/Roman-Faria1/Kinloop/issues/4) | Environment-driven indexing before public launch. `robots.ts` and `src/proxy.ts` disable indexing unconditionally; noindex is not access control |
 | [#6](https://github.com/Roman-Faria1/Kinloop/issues/6) | Distinguish incomplete invite links from admin config errors. Inspected code appears to address this through PR #12; verify acceptance and close separately if satisfied |
 | [#7](https://github.com/Roman-Faria1/Kinloop/issues/7) | Decide/enforce who may copy active invite links; currently any non-demo pod member can copy |
 | [#8](https://github.com/Roman-Faria1/Kinloop/issues/8) | Duplicate-membership preflight/cleanup for older databases |
@@ -218,12 +222,13 @@ Live open issues checked on 2026-10-20:
 
 Other discussed work has not necessarily been filed: auth log retention, pod/member settings and role management, profile editing, invite email/resend, realtime, and actual reminder delivery. A global admin console and the Effection library were not adopted.
 
-Immediate sequence: smoke-test event creation/edit/cancellation after the merged production deployment, triage npm audit findings in a separate maintenance branch, then create a fresh feature branch for notification enrollment and reliable delivery. Delivery needs a worker, recipient/channel checks at send time, idempotent sends, retries/reconciliation, and observable outcomes. Pending database rows or a readiness flag do not demonstrate that a reminder was sent.
+Immediate sequence: deploy and verify the session-refresh fix, smoke-test event creation/edit/cancellation, triage npm audit findings in a separate maintenance branch, then create a fresh feature branch for notification enrollment and reliable delivery. Delivery needs a worker, recipient/channel checks at send time, idempotent sends, retries/reconciliation, and observable outcomes. Pending database rows or a readiness flag do not demonstrate that a reminder was sent.
 
 `package.json` says `0.1.0`, but that alone does not establish a released/tagged alpha. The agreed policy is meaningful `v0.x.y` milestone tags, with `v0.1.0` for a usable hosted alpha; check actual tags/releases before proposing one.
 
 ## Lessons From Prior Debugging
 
+- With `src/app`, the Next.js 16 request proxy belongs at `src/proxy.ts`, not the repository root. Confirm registration in production build output rather than assuming a file runs. Refresh sessions in the proxy before rendering, forward cookies to both request and response, preserve cache headers, and tolerate the known read-only cookie exception in Server Components without masking unrelated errors.
 - Production magic links went to localhost when the app URL was absent/wrong or the fix only existed on an unmerged branch. Final behavior requires an explicit trusted configured origin and validates it before classifying the email. Recheck Vercel env scope/deployment, Supabase Site URL/redirects, and email template behavior; use a fresh link after changes.
 - Implicit auth puts tokens in the URL fragment, which the server cannot read. The callback's browser bridge and completion endpoint exist for this reason; supporting only `code`/`token_hash` was insufficient. Existing origin/state-cookie checks should be preserved and reviewed, not treated as a blanket security guarantee.
 - Public env references in the browser Supabase client must remain direct `process.env.NEXT_PUBLIC_*` reads for Next's client bundling. Reusing the shared server-style env parser previously produced a false "not configured" state.
