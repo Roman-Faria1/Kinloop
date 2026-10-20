@@ -25,14 +25,20 @@ function createAdminClient({
   maybeSingleHandlers = {},
   commandHandlers = {},
   upsertHandlers = {},
+  rpcHandler,
 }: {
   selectHandlers?: Record<string, ScenarioHandler>;
   singleHandlers?: Record<string, ScenarioHandler>;
   maybeSingleHandlers?: Record<string, ScenarioHandler>;
   commandHandlers?: Record<string, ScenarioHandler>;
   upsertHandlers?: Record<string, UpsertHandler>;
+  rpcHandler?: (name: string, payload: unknown) => ScenarioResult;
 }) {
   return {
+    rpc(name: string, payload: unknown) {
+      if (!rpcHandler) throw new Error(`Unexpected RPC: ${name}`);
+      return Promise.resolve(rpcHandler(name, payload));
+    },
     from(table: string) {
       const state: QueryState = {
         action: "select",
@@ -283,28 +289,9 @@ describe("event mutations", () => {
   });
 
   it("updates an event and reschedules reminder deliveries", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-23T12:00:00.000Z"));
-
-    const eventUpdates: unknown[] = [];
-    const deliveryUpdates: QueryState[] = [];
-    const deliveryUpserts: Array<{ payload: unknown; options: unknown }> = [];
+    const rpcCalls: Array<{ name: string; payload: unknown }> = [];
 
     const adminClient = createAdminClient({
-      selectHandlers: {
-        pod_memberships: () => ({
-          data: [{ id: "membership-owner" }],
-          error: null,
-        }),
-        notification_channels: () => ({
-          data: [{ membership_id: "membership-owner", channel: "email" }],
-          error: null,
-        }),
-        notification_deliveries: () => ({
-          data: [{ id: "delivery-old", dedupe_key: "old-key" }],
-          error: null,
-        }),
-      },
       maybeSingleHandlers: {
         pod_memberships: () => ({
           data: {
@@ -328,22 +315,9 @@ describe("event mutations", () => {
           error: null,
         }),
       },
-      commandHandlers: {
-        "events:update": (state) => {
-          eventUpdates.push(state.payload);
-          return { data: null, error: null };
-        },
-        "notification_deliveries:update": (state) => {
-          deliveryUpdates.push(state);
-          return { data: null, error: null };
-        },
-      },
-      upsertHandlers: {
-        event_reminders: () => ({ error: null }),
-        notification_deliveries: (payload, options) => {
-          deliveryUpserts.push({ payload, options });
-          return { error: null };
-        },
+      rpcHandler: (name, payload) => {
+        rpcCalls.push({ name, payload });
+        return { data: "event-1", error: null };
       },
     });
 
@@ -360,25 +334,20 @@ describe("event mutations", () => {
       }),
     ).resolves.toBe("event-1");
 
-    expect(eventUpdates).toHaveLength(1);
-    expect(deliveryUpdates).toHaveLength(1);
-    expect(deliveryUpdates[0].payload).toEqual({ status: "cancelled" });
-    expect(deliveryUpserts).toEqual([
+    expect(rpcCalls).toEqual([
       {
-        payload: [
-          {
-            membership_id: "membership-owner",
-            event_id: "event-1",
-            channel: "email",
-            scheduled_for: "2026-04-24T21:30:00.000Z",
-            status: "pending",
-            sent_at: null,
-            dedupe_key: "event-1:membership-owner:email:2026-04-24T21:30:00.000Z",
-          },
-        ],
-        options: {
-          onConflict: "dedupe_key",
-          ignoreDuplicates: true,
+        name: "mutate_pod_event_with_reminders",
+        payload: {
+          p_pod_id: "pod-1",
+          p_event_id: "event-1",
+          p_actor_user_id: viewer.userId,
+          p_action: "update",
+          p_title: "Updated carpool",
+          p_notes: "New pickup time",
+          p_location: "School",
+          p_starts_at: "2026-04-24T22:00:00.000Z",
+          p_event_kind: "standard",
+          p_reminder_offset_minutes: 30,
         },
       },
     ]);
@@ -389,10 +358,9 @@ describe("event mutations", () => {
 
     const adminClient = createAdminClient({
       selectHandlers: {
-        notification_deliveries: () => ({
-          data: [],
-          error: null,
-        }),
+        notification_deliveries: () => {
+          throw new Error("Rejected edits must not access reminder deliveries.");
+        },
       },
       maybeSingleHandlers: {
         pod_memberships: () => ({
@@ -543,19 +511,9 @@ describe("event mutations", () => {
   });
 
   it("cancels an event and suppresses pending reminder deliveries", async () => {
-    const eventUpdates: unknown[] = [];
-    const deliveryUpdates: QueryState[] = [];
+    const rpcCalls: Array<{ name: string; payload: unknown }> = [];
 
     const adminClient = createAdminClient({
-      selectHandlers: {
-        notification_deliveries: () => ({
-          data: [
-            { id: "delivery-1", dedupe_key: "key-1" },
-            { id: "delivery-2", dedupe_key: "key-2" },
-          ],
-          error: null,
-        }),
-      },
       maybeSingleHandlers: {
         pod_memberships: () => ({
           data: {
@@ -579,15 +537,9 @@ describe("event mutations", () => {
           error: null,
         }),
       },
-      commandHandlers: {
-        "events:update": (state) => {
-          eventUpdates.push(state.payload);
-          return { data: null, error: null };
-        },
-        "notification_deliveries:update": (state) => {
-          deliveryUpdates.push(state);
-          return { data: null, error: null };
-        },
+      rpcHandler: (name, payload) => {
+        rpcCalls.push({ name, payload });
+        return { data: "event-1", error: null };
       },
     });
 
@@ -598,13 +550,46 @@ describe("event mutations", () => {
       }),
     ).resolves.toBe("event-1");
 
-    expect(eventUpdates).toEqual([{ is_cancelled: true }]);
-    expect(deliveryUpdates).toHaveLength(1);
-    expect(deliveryUpdates[0].payload).toEqual({ status: "cancelled" });
-    expect(deliveryUpdates[0].filters).toContainEqual({
-      field: "id",
-      value: ["delivery-1", "delivery-2"],
-      operator: "in",
+    expect(rpcCalls).toEqual([{
+      name: "mutate_pod_event_with_reminders",
+      payload: {
+        p_pod_id: "pod-1",
+        p_event_id: "event-1",
+        p_actor_user_id: viewer.userId,
+        p_action: "cancel",
+      },
+    }]);
+  });
+
+  it.each([
+    ["update", "XX000", 500, "Unable to update that event right now."],
+    ["cancel", "XX000", 500, "Unable to cancel that event right now."],
+    ["update", "PT409", 409, "Cancelled events cannot be edited."],
+    ["update", "PT403", 403, "You do not have permission to edit that event."],
+    ["cancel", "PT404", 404, "That event could not be found."],
+    ["update", "PT400", 400, "Enter valid event details before saving."],
+  ] as const)("maps %s RPC error %s to status %s", async (action, code, status, message) => {
+    const adminClient = createAdminClient({
+      maybeSingleHandlers: {
+        pod_memberships: () => ({ data: {
+          id: "membership-owner", pod_id: "pod-1", user_id: viewer.userId, role: "owner",
+        }, error: null }),
+        events: () => ({ data: {
+          id: "event-1", pod_id: "pod-1", creator_membership_id: "membership-owner",
+          starts_at: "2026-04-24T20:00:00.000Z", ends_at: "2026-04-24T21:00:00.000Z",
+          event_kind: "standard", is_cancelled: false,
+        }, error: null }),
+      },
+      rpcHandler: () => ({ error: { code, message: "Internal database details" } }),
     });
+    const input = {
+      podId: "pod-1", eventId: "event-1", title: "Updated", notes: "",
+      startsAt: "2026-04-24T22:00:00.000Z", eventKind: "standard" as const,
+      reminderOffsetMinutes: 30 as const,
+    };
+    await expect(action === "update"
+      ? updateEventForPod(adminClient as never, viewer, input)
+      : cancelEventForPod(adminClient as never, viewer, input)
+    ).rejects.toMatchObject({ status, message });
   });
 });

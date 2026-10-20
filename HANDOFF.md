@@ -43,24 +43,27 @@ Verified locally on 2026-10-20:
 | Item | State |
 | --- | --- |
 | Branch | `feat/reminder-scheduling-side-effects` |
-| HEAD | `0a4072e` - `fix: harden reminder scheduling edge cases` |
+| Baseline before the atomic mutation fix | `a8f9a2c` - `docs: add shared project handoff for agents and devices`; use `git log` for current HEAD |
 | Previous feature commit | `390ac96` - `feat: schedule reminder deliveries from event writes` |
 | Local `main` and cached `origin/main` | `3ebf36c` - merge of PR #12 |
-| Working tree before this documentation work | Clean; feature branch matched its cached remote tracking ref |
-| Active PR, checked live | [#13: schedule reminder deliveries from event writes](https://github.com/Roman-Faria1/Kinloop/pull/13), open and unmerged; head matches `0a4072e` |
+| Transaction fix | Prepared for publication as `fix: make event and reminder updates atomic`; check Git and PR head for publication status |
+| Active PR | [#13: schedule reminder deliveries from event writes](https://github.com/Roman-Faria1/Kinloop/pull/13), open and unmerged at the last live check; recheck current CI and review state |
 | SQL migration `0005` | Owner reported applying it in Supabase SQL Editor; not independently checked against the database |
+| SQL migration `0006` | Owner reported running it in Supabase and confirming the function exists via SQL Editor; runtime integration not independently checked |
 
 PR #13's original six comments were addressed in `0a4072e` and are resolved on GitHub. Four concerned fake timers; the other two concerned restoring cancelled deliveries and rejecting edits to cancelled events.
 
-**There are three newer unresolved review threads. This is the immediate unfinished work:**
+**Three newer review concerns are addressed by the atomic mutation fix; check GitHub for current thread status:**
 
 1. `updateEventForPod()` saves the event before saving its reminder rule/schedule. A later failure returns an error although the event update remains committed.
-2. `cancelEventForPod()` saves cancellation before suppressing delivery rows. A suppression failure likewise returns an error after the event changed. GitHub marks this thread outdated, but it remains unresolved and the behavioral concern still needs assessment.
+2. `cancelEventForPod()` saved cancellation before suppressing delivery rows. A suppression failure likewise returned an error after the event changed. The transaction now rolls back both writes on failure.
 3. The cancelled-event edit guard tries to clean up deliveries before returning `409`. Cleanup failure can turn that expected conflict into `500`.
 
-These are not fixed yet. Choose a consistent approach for atomic writes or durable reconciliation, with meaningful failure/retry tests. Do not simply swallow scheduling failures and claim reliable reminders without a recovery mechanism. Inspect the latest code and review context before selecting an implementation.
+The fix uses `public.mutate_pod_event_with_reminders` from migration `0006_atomic_event_mutations.sql`. Update and cancel run as single database transactions, lock the target event, and recheck actor membership/permissions. Updates include the reminder rule and delivery reschedule; cancellation includes pending-delivery suppression. Failures roll back all writes. Cancelled edits reject with `409` without delivery cleanup, including the transaction's state recheck.
 
-The scope of this documentation pass is continuity only; it does not resolve those review threads or merge PR #13.
+The RPC is `SECURITY INVOKER`, callable by `service_role` only, with an explicit empty search path. Server code supplies the user ID from the verified viewer session. Event creation still uses the prior TypeScript scheduler and compensating delete on failure; do not claim every lifecycle write is now transactional.
+
+Next gate: confirm the atomic fix is published to PR #13, review replies are posted, and CI passes for that exact head before merging. The owner reported applying migration `0006`; a production smoke test still needs the corresponding deployed code. Database changes were not run by the agent.
 
 ## Implemented Versus Planned
 
@@ -72,7 +75,7 @@ The scope of this documentation pass is continuity only; it does not resolve tho
 | Invitations | Create/reuse, copy link, revoke, accept; tokenless join recovery for signed-in invited email | Invite email delivery/resend from app code |
 | Events | Persistent create/edit/cancel, location and reminder timing, server permission checks | Assignments and richer editing |
 | Profiles | Read data and derive birthday agenda entries | Profile/birthday/address editing UI |
-| Reminder scheduling | PR #13 writes pending deliveries for enabled channels, suppresses obsolete pending rows, restores cancelled matching rows | Resolve PR #13 partial-write concerns; integrate actual delivery |
+| Reminder scheduling | PR #13 writes pending deliveries for enabled channels, suppresses obsolete pending rows, restores cancelled matching rows; local transaction fix for update/cancel | Apply/deploy transaction migration and finish PR #13 review; integrate actual delivery |
 | Notifications | Delivery/channel tables and an Inngest schedule-computation placeholder | Channel enrollment/preferences, push subscriptions, send worker, retries, delivery outcomes |
 | Realtime | Supabase is available in the stack | No active subscription flow found; the readiness flag alone is not evidence of realtime updates |
 
@@ -97,6 +100,8 @@ Paths below are relative to the repository root so they work on other devices.
 | `src/domains/pods/repository.ts` | Session-aware Supabase reads and dashboard mapping |
 | `src/components/dashboard/pod-workspace.tsx` | Main agenda/composer/invite/delivery UI; demo mode uses local state |
 | `src/domains/events/mutations.ts` | Persistent event writes and scheduling side effects |
+| `supabase/migrations/0006_atomic_event_mutations.sql` | Atomic update/cancel RPC; server-only execution, permission/state rechecks, and reminder synchronization |
+| `src/domains/events/atomic-mutations.test.ts` | PGlite PostgreSQL tests loading migrations and injecting failures to verify rollback and role restrictions |
 | `src/domains/events/service.ts`, `src/domains/profiles/service.ts` | Upcoming agenda and derived birthday entries |
 | `src/domains/reminders/service.ts`, `src/domains/reminders/scheduling.ts` | Due-time/dedupe helpers and delivery persistence |
 | `src/domains/notifications/workflows.ts`, `src/app/api/inngest/route.ts` | Inngest placeholder; returns schedules rather than delivering them |
@@ -105,7 +110,7 @@ Paths below are relative to the repository root so they work on other devices.
 | `src/lib/types.ts`, `src/lib/drizzle/schema.ts`, `supabase/migrations/` | Shared types, schema representation, applied SQL sequence |
 | `src/lib/demo/data.ts` | Seeded demo dashboard |
 
-Runtime database reads/writes currently use Supabase clients. Drizzle describes the schema; there is no active direct-Postgres transaction layer to assume is already available. Admin clients bypass RLS, so every privileged write must verify the authenticated actor's membership and permissions server-side.
+Runtime database reads/writes use Supabase clients; update/cancel now call the transactional PostgreSQL RPC defined in migration `0006`. Drizzle describes table/enum schemas but does not track the SQL function. Admin clients bypass RLS, so every privileged write must verify the authenticated actor's membership and permissions server-side, including inside the transaction.
 
 Roles are `owner`, `adult`, and `member`. Owners/adults create events. Owners/adults or an event's creator can edit non-birthday events; birthday edits are denied here. Owners can invite any role; adults can invite members. The shared membership-management helper does not mean role-edit/removal endpoints already exist.
 
@@ -158,8 +163,9 @@ SQL migrations have historically been applied manually in Supabase SQL Editor, i
 | `0003_pod_membership_uniqueness.sql` | Unique `(pod_id, user_id)` memberships |
 | `0004_event_reminder_uniqueness.sql` | Dedupe reminder rows, unique `event_id` |
 | `0005_delivery_status_cancelled.sql` | `cancelled` enum value and `(event_id, status)` delivery index |
+| `0006_atomic_event_mutations.sql` | Transactional event update/cancel with reminders; execution restricted to `service_role` |
 
-The owner reported successful application through `0005`. Keep new migrations additive and update Drizzle/types together. `0003` can fail on existing duplicates; `0004` deliberately deletes duplicate reminder rows. Do not rerun initial schema setup or invent production seed data to work around auth/invite bugs.
+The owner reported successful application through `0006` and confirmed that its function exists in Supabase SQL Editor. This is user-reported setup, not an independently verified application smoke test. Other environments must also apply `0006` before deploying code that calls the RPC. It does not alter tables/enums, so no Drizzle table/type change is needed. Keep new migrations additive and update Drizzle/types when changing tables. `0003` can fail on existing duplicates; `0004` deliberately deletes duplicate reminder rows. Do not rerun initial schema setup or invent production seed data to work around auth/invite bugs.
 
 ## Local Development And Verification
 
@@ -186,7 +192,9 @@ Playwright currently has one Chromium landing/navigation smoke test. Its branch 
 
 CI in `.github/workflows/ci.yml` currently runs `npm ci`, lint, typecheck, and unit tests on PRs/main pushes. Build and E2E are not CI steps there; verify them separately when warranted.
 
-Last reported application validation in the prior session: lint, typecheck, 35 unit tests across 8 files, and build passed for `0a4072e`. Those are historical results, not checks rerun on 2026-10-20. E2E was not reported as rerun for PR #13. Fresh dependency/runtime/provider changes can invalidate old results.
+Local validation on 2026-10-20 for the transaction fixes: lint, typecheck, 61 tests across 9 files, and production build passed. The suite now includes PGlite as a dev dependency to execute PostgreSQL migrations and verify transaction rollback, role restrictions, scheduling idempotency, and permission/error behavior without accessing Supabase. PGlite does not test hosted PostgREST/session behavior or simultaneous connections. E2E was not rerun for these server/database changes.
+
+The dependency install also reported npm audit findings (66 total, including one critical). These were not triaged in this pass, and no unrelated dependency upgrades or automatic audit fixes were applied. Assess them separately before a public launch; passing tests do not resolve dependency advisories.
 
 ## Workflow And Collaboration Preferences
 
@@ -215,7 +223,7 @@ Live open issues checked on 2026-10-20:
 
 Other discussed work has not necessarily been filed: auth log retention, pod/member settings and role management, profile editing, invite email/resend, realtime, and actual reminder delivery. A global admin console and the Effection library were not adopted.
 
-Immediate sequence: resolve the three remaining PR #13 review concerns, verify appropriate checks, have the owner push/respond/merge, then create a fresh branch for notification enrollment and reliable delivery. Delivery needs a worker, recipient/channel checks at send time, idempotent sends, retries/reconciliation, and observable outcomes. Pending database rows or a readiness flag do not demonstrate that a reminder was sent.
+Immediate sequence: finish PR #13 publication/review/checks, have the owner merge when ready, and smoke-test event edits/cancellation after deployment. Then create a fresh branch for notification enrollment and reliable delivery. Delivery needs a worker, recipient/channel checks at send time, idempotent sends, retries/reconciliation, and observable outcomes. Pending database rows or a readiness flag do not demonstrate that a reminder was sent.
 
 `package.json` says `0.1.0`, but that alone does not establish a released/tagged alpha. The agreed policy is meaningful `v0.x.y` milestone tags, with `v0.1.0` for a usable hosted alpha; check actual tags/releases before proposing one.
 
