@@ -42,28 +42,23 @@ Verified locally on 2026-10-20:
 
 | Item | State |
 | --- | --- |
-| Branch | `feat/reminder-scheduling-side-effects` |
-| Baseline before the atomic mutation fix | `a8f9a2c` - `docs: add shared project handoff for agents and devices`; use `git log` for current HEAD |
-| Previous feature commit | `390ac96` - `feat: schedule reminder deliveries from event writes` |
-| Local `main` and cached `origin/main` | `3ebf36c` - merge of PR #12 |
-| Transaction fix | Prepared for publication as `fix: make event and reminder updates atomic`; check Git and PR head for publication status |
-| Active PR | [#13: schedule reminder deliveries from event writes](https://github.com/Roman-Faria1/Kinloop/pull/13), open and unmerged at the last live check; recheck current CI and review state |
+| Branch for this checkpoint update | `docs/update-reminder-handoff`, created from merged `origin/main`; recheck Git for current branch and working-tree state |
+| Verified remote `main` | `89a216b` - merge of PR #13; local `main` can still lag until fast-forwarded |
+| Transaction fix | `f9c152b` - `fix: make event and reminder updates atomic`, included in the merge |
+| Completed PR | [#13: schedule reminder deliveries from event writes](https://github.com/Roman-Faria1/Kinloop/pull/13), confirmed merged on 2026-10-20; remote feature branch deletion confirmed by fetch/prune |
+| Checks/review | All review threads resolved; GitHub CI and Vercel preview passed for `f9c152b` before merge |
 | SQL migration `0005` | Owner reported applying it in Supabase SQL Editor; not independently checked against the database |
 | SQL migration `0006` | Owner reported running it in Supabase and confirming the function exists via SQL Editor; runtime integration not independently checked |
 
 PR #13's original six comments were addressed in `0a4072e` and are resolved on GitHub. Four concerned fake timers; the other two concerned restoring cancelled deliveries and rejecting edits to cancelled events.
 
-**Three newer review concerns are addressed by the atomic mutation fix; check GitHub for current thread status:**
-
-1. `updateEventForPod()` saves the event before saving its reminder rule/schedule. A later failure returns an error although the event update remains committed.
-2. `cancelEventForPod()` saved cancellation before suppressing delivery rows. A suppression failure likewise returned an error after the event changed. The transaction now rolls back both writes on failure.
-3. The cancelled-event edit guard tries to clean up deliveries before returning `409`. Cleanup failure can turn that expected conflict into `500`.
+The three later review threads were also fixed, replied to, and resolved before merge: partial event edits, partial cancellation, and a cancelled-edit guard that could turn `409` into `500` during cleanup.
 
 The fix uses `public.mutate_pod_event_with_reminders` from migration `0006_atomic_event_mutations.sql`. Update and cancel run as single database transactions, lock the target event, and recheck actor membership/permissions. Updates include the reminder rule and delivery reschedule; cancellation includes pending-delivery suppression. Failures roll back all writes. Cancelled edits reject with `409` without delivery cleanup, including the transaction's state recheck.
 
 The RPC is `SECURITY INVOKER`, callable by `service_role` only, with an explicit empty search path. Server code supplies the user ID from the verified viewer session. Event creation still uses the prior TypeScript scheduler and compensating delete on failure; do not claim every lifecycle write is now transactional.
 
-Next gate: confirm the atomic fix is published to PR #13, review replies are posted, and CI passes for that exact head before merging. The owner reported applying migration `0006`; a production smoke test still needs the corresponding deployed code. Database changes were not run by the agent.
+Next gate: confirm Vercel production deployed the merge, then smoke-test creating, editing, and cancelling an event. The owner reported applying migration `0006`; hosted runtime integration has not been independently checked. Database changes were not run by the agent. Triage the dependency audit findings before adding the next feature.
 
 ## Implemented Versus Planned
 
@@ -75,7 +70,7 @@ Next gate: confirm the atomic fix is published to PR #13, review replies are pos
 | Invitations | Create/reuse, copy link, revoke, accept; tokenless join recovery for signed-in invited email | Invite email delivery/resend from app code |
 | Events | Persistent create/edit/cancel, location and reminder timing, server permission checks | Assignments and richer editing |
 | Profiles | Read data and derive birthday agenda entries | Profile/birthday/address editing UI |
-| Reminder scheduling | PR #13 writes pending deliveries for enabled channels, suppresses obsolete pending rows, restores cancelled matching rows; local transaction fix for update/cancel | Apply/deploy transaction migration and finish PR #13 review; integrate actual delivery |
+| Reminder scheduling | Merged PR #13 writes pending deliveries for enabled channels, suppresses obsolete pending rows, restores cancelled matching rows; transactional update/cancel | Production smoke test, enrollment/preferences, and actual delivery |
 | Notifications | Delivery/channel tables and an Inngest schedule-computation placeholder | Channel enrollment/preferences, push subscriptions, send worker, retries, delivery outcomes |
 | Realtime | Supabase is available in the stack | No active subscription flow found; the readiness flag alone is not evidence of realtime updates |
 
@@ -223,7 +218,7 @@ Live open issues checked on 2026-10-20:
 
 Other discussed work has not necessarily been filed: auth log retention, pod/member settings and role management, profile editing, invite email/resend, realtime, and actual reminder delivery. A global admin console and the Effection library were not adopted.
 
-Immediate sequence: finish PR #13 publication/review/checks, have the owner merge when ready, and smoke-test event edits/cancellation after deployment. Then create a fresh branch for notification enrollment and reliable delivery. Delivery needs a worker, recipient/channel checks at send time, idempotent sends, retries/reconciliation, and observable outcomes. Pending database rows or a readiness flag do not demonstrate that a reminder was sent.
+Immediate sequence: smoke-test event creation/edit/cancellation after the merged production deployment, triage npm audit findings in a separate maintenance branch, then create a fresh feature branch for notification enrollment and reliable delivery. Delivery needs a worker, recipient/channel checks at send time, idempotent sends, retries/reconciliation, and observable outcomes. Pending database rows or a readiness flag do not demonstrate that a reminder was sent.
 
 `package.json` says `0.1.0`, but that alone does not establish a released/tagged alpha. The agreed policy is meaningful `v0.x.y` milestone tags, with `v0.1.0` for a usable hosted alpha; check actual tags/releases before proposing one.
 

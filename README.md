@@ -21,7 +21,7 @@ The app supports real Supabase auth, pod creation/invites, and persisted event c
 
 - the app boots and renders a realistic family workspace immediately
 - real mode reads/writes pods and events through Supabase with server-side permission checks
-- the reminder scheduling branch persists delivery work; actual notification sending remains unfinished
+- reminder scheduling persists delivery work; event edits/cancellation use database transactions, while actual notification sending remains unfinished
 
 See the dated checkpoint in [HANDOFF.md](HANDOFF.md) for which work is merged versus still in review. Deployed infrastructure is not proof that every integration is complete.
 
@@ -96,8 +96,8 @@ The initial SQL lives in [supabase/migrations/0000_famplan_initial.sql](supabase
 
 ## Next Steps
 
-1. Finish the reminder scheduling PR's remaining write-consistency review items.
-2. Add notification enrollment/preferences and reliable reminder delivery.
-3. Continue pod/member management and profile editing in focused branches.
+1. Smoke-test event create/edit/cancel after the merged reminder scheduling deployment.
+2. Triage dependency audit findings before expanding features.
+3. Add notification enrollment/preferences and reliable reminder delivery, then continue pod/member management and profile editing in focused branches.
 
 Check [HANDOFF.md](HANDOFF.md) and current GitHub issues/PRs before selecting the next task.
