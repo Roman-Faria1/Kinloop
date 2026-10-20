@@ -1,6 +1,10 @@
-# FamPlan
+# Kinloop
 
-FamPlan is a family coordination web app built for one clear job: help a small family remember plans, handle short-notice activities, and keep shared household context in one place without becoming a generic chat app.
+Kinloop (originally FamPlan) is a family coordination web app built for one clear job: help a small family remember plans, handle short-notice activities, and keep shared household context in one place without becoming a generic chat app.
+
+## Continuing Work
+
+Start with [HANDOFF.md](HANDOFF.md) when resuming on another device, with another model, or in a new chat. It records the architecture, decisions, deployment setup, active work, open issues, and a reusable session-start prompt. [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) point coding agents to the same shared context.
 
 ## Stack
 
@@ -13,11 +17,13 @@ FamPlan is a family coordination web app built for one clear job: help a small f
 
 ## Current State
 
-This repo is production-shaped and runs in a safe local `demo mode` by default. That means:
+The app supports real Supabase auth, pod creation/invites, and persisted event create/edit/cancel flows. Without Supabase configuration, it falls back to seeded `demo mode`.
 
 - the app boots and renders a realistic family workspace immediately
-- domain services, schema, migrations, env handling, and notification plumbing are in place
-- real Supabase, Inngest, and Resend credentials can be added later without rewriting the app structure
+- real mode reads/writes pods and events through Supabase with server-side permission checks
+- the reminder scheduling branch persists delivery work; actual notification sending remains unfinished
+
+See the dated checkpoint in [HANDOFF.md](HANDOFF.md) for which work is merged versus still in review. Deployed infrastructure is not proof that every integration is complete.
 
 ## Scripts
 
@@ -38,7 +44,7 @@ The repo uses:
 - Conventional Commits for commit messages
 - milestone-oriented `0.x` semantic version tags once the app is deployable
 
-See [CONTRIBUTING.md](/home/roman/dev-env/famplan/CONTRIBUTING.md:1) for the branching and release workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branching and release workflow.
 
 ## Environment
 
@@ -86,11 +92,12 @@ Security defaults in the current build:
 - `notification_channels`
 - `notification_deliveries`
 
-The initial SQL lives in [supabase/migrations/0000_famplan_initial.sql](/home/roman/dev-env/famplan/supabase/migrations/0000_famplan_initial.sql:1), and the Drizzle schema lives in [src/lib/drizzle/schema.ts](/home/roman/dev-env/famplan/src/lib/drizzle/schema.ts:1).
+The initial SQL lives in [supabase/migrations/0000_famplan_initial.sql](supabase/migrations/0000_famplan_initial.sql), and the Drizzle schema lives in [src/lib/drizzle/schema.ts](src/lib/drizzle/schema.ts). Apply subsequent SQL migrations in order for each environment; see the migration inventory in [HANDOFF.md](HANDOFF.md).
 
 ## Next Steps
 
-1. Provision Supabase, Resend, and Inngest.
-2. Apply the SQL migrations, including the profile visibility policy.
-3. Add pod creation and invite acceptance for authenticated users with no membership yet.
-4. Add authenticated event mutations so the live pod composer writes through to Postgres.
+1. Finish the reminder scheduling PR's remaining write-consistency review items.
+2. Add notification enrollment/preferences and reliable reminder delivery.
+3. Continue pod/member management and profile editing in focused branches.
+
+Check [HANDOFF.md](HANDOFF.md) and current GitHub issues/PRs before selecting the next task.
