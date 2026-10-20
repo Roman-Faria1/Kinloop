@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test("renders the landing page and demo pod workspace", async ({ page }) => {
-  await page.goto("/");
+  const response = await page.goto("/");
+  expect(response?.headers()["x-frame-options"]).toBe("DENY");
+  expect(response?.headers()["x-robots-tag"]).toBe("noindex, nofollow, noarchive");
   await expect(
     page.getByRole("heading", { name: /family coordination layer/i }),
   ).toBeVisible();
