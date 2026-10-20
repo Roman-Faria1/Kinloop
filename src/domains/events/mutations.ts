@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreateEvents, canEditEvent } from "@/domains/auth/roles";
 import type { ViewerSession } from "@/domains/auth/session";
+import {
+  ReminderSchedulingError,
+  syncEventReminderDeliveries,
+} from "@/domains/reminders/scheduling";
 import type { EventKind, PodRole, ReminderOffsetMinutes } from "@/lib/types";
 
 type AdminClient = SupabaseClient;
@@ -16,8 +20,6 @@ interface ManagedEventRow {
   id: string;
   pod_id: string;
   creator_membership_id: string | null;
-  starts_at: string;
-  ends_at: string;
   event_kind: EventKind;
   is_cancelled: boolean;
 }
@@ -71,6 +73,36 @@ function computeEndsAt(startsAt: Date, durationMs = 60 * 60 * 1000) {
   return new Date(startsAt.getTime() + durationMs).toISOString();
 }
 
+function toEventMutationError(error: unknown) {
+  if (error instanceof EventMutationError) {
+    return error;
+  }
+
+  if (error instanceof ReminderSchedulingError) {
+    return new EventMutationError(error.message, 500);
+  }
+
+  return new EventMutationError("Unable to update reminder scheduling right now.", 500);
+}
+
+function toEventRpcError(error: { code?: string }, action: "update" | "cancel") {
+  switch (error.code) {
+    case "PT400":
+      return new EventMutationError("Enter valid event details before saving.", 400);
+    case "PT403":
+      return new EventMutationError(
+        `You do not have permission to ${action === "update" ? "edit" : "cancel"} that event.`,
+        403,
+      );
+    case "PT404":
+      return new EventMutationError("That event could not be found.", 404);
+    case "PT409":
+      return new EventMutationError("Cancelled events cannot be edited.", 409);
+    default:
+      return new EventMutationError(`Unable to ${action} that event right now.`, 500);
+  }
+}
+
 async function getActorMembership(
   adminClient: AdminClient,
   viewer: ViewerSession,
@@ -119,7 +151,7 @@ async function getManagedEvent(
 ) {
   const { data, error } = await adminClient
     .from("events")
-    .select("id, pod_id, creator_membership_id, starts_at, ends_at, event_kind, is_cancelled")
+    .select("id, pod_id, creator_membership_id, event_kind, is_cancelled")
     .eq("id", eventId)
     .eq("pod_id", podId)
     .maybeSingle<ManagedEventRow>();
@@ -191,9 +223,15 @@ export async function createEventForPod(
 
   try {
     await replaceReminderRule(adminClient, eventRow.id, input.reminderOffsetMinutes);
+    await syncEventReminderDeliveries(adminClient, {
+      podId: input.podId,
+      eventId: eventRow.id,
+      startsAt: startsAt.toISOString(),
+      reminderOffsetMinutes: input.reminderOffsetMinutes,
+    });
   } catch (error) {
     await adminClient.from("events").delete().eq("id", eventRow.id);
-    throw error;
+    throw toEventMutationError(error);
   }
 
   return eventRow.id;
@@ -214,29 +252,27 @@ export async function updateEventForPod(
     throw new EventMutationError("You do not have permission to edit that event.", 403);
   }
 
-  const startsAt = parseIsoDateTime(input.startsAt, "start time");
-  const currentDurationMs =
-    new Date(currentEvent.ends_at).getTime() - new Date(currentEvent.starts_at).getTime();
-  const fallbackDurationMs = currentDurationMs > 0 ? currentDurationMs : 60 * 60 * 1000;
-
-  const { error: updateError } = await adminClient
-    .from("events")
-    .update({
-      title: input.title.trim(),
-      notes: input.notes.trim(),
-      location: normalizeLocation(input.location, input.eventKind),
-      starts_at: startsAt.toISOString(),
-      ends_at: computeEndsAt(startsAt, fallbackDurationMs),
-      event_kind: input.eventKind,
-    })
-    .eq("id", input.eventId)
-    .eq("pod_id", input.podId);
-
-  if (updateError) {
-    throw new EventMutationError("Unable to update that event right now.", 500);
+  if (currentEvent.is_cancelled) {
+    throw new EventMutationError("Cancelled events cannot be edited.", 409);
   }
 
-  await replaceReminderRule(adminClient, input.eventId, input.reminderOffsetMinutes);
+  const startsAt = parseIsoDateTime(input.startsAt, "start time");
+  const { error: updateError } = await adminClient.rpc("mutate_pod_event_with_reminders", {
+    p_pod_id: input.podId,
+    p_event_id: input.eventId,
+    p_actor_user_id: viewer.userId,
+    p_action: "update",
+    p_title: input.title.trim(),
+    p_notes: input.notes.trim(),
+    p_location: normalizeLocation(input.location, input.eventKind),
+    p_starts_at: startsAt.toISOString(),
+    p_event_kind: input.eventKind,
+    p_reminder_offset_minutes: input.reminderOffsetMinutes,
+  });
+
+  if (updateError) {
+    throw toEventRpcError(updateError, "update");
+  }
 
   return input.eventId;
 }
@@ -256,18 +292,15 @@ export async function cancelEventForPod(
     throw new EventMutationError("You do not have permission to cancel that event.", 403);
   }
 
-  if (currentEvent.is_cancelled) {
-    return input.eventId;
-  }
-
-  const { error } = await adminClient
-    .from("events")
-    .update({ is_cancelled: true })
-    .eq("id", input.eventId)
-    .eq("pod_id", input.podId);
+  const { error } = await adminClient.rpc("mutate_pod_event_with_reminders", {
+    p_pod_id: input.podId,
+    p_event_id: input.eventId,
+    p_actor_user_id: viewer.userId,
+    p_action: "cancel",
+  });
 
   if (error) {
-    throw new EventMutationError("Unable to cancel that event right now.", 500);
+    throw toEventRpcError(error, "cancel");
   }
 
   return input.eventId;
